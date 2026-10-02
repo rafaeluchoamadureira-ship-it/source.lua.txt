@@ -28,7 +28,7 @@ sub('local HttpService = game:GetService("HttpService")\n',
 sub('local CONTENT_TOP = PAD + 4\n',
     'local CONTENT_TOP = PAD + 4\nlocal MIN_W, MIN_H = 420, 340\nlocal MAX_W, MAX_H = 900, 720\n')
 
-# ---------------------------------------------------------------- helpers
+ ---------------------------------------------------------------- helpers
 helpers = r'''--==================================================
 -- AUXILIARES DE ARRASTE / COR / ARQUIVOS
 --==================================================
@@ -131,7 +131,7 @@ end
 a = header_start('-- TEMA (objetos "tematizados")')
 s = s[:a] + helpers + s[a:]
 
-# ---------------------------------------------------------------- _Hover
+ ---------------------------------------------------------------- _Hover
 a = idx('function HubLibrary:_Hover(')
 b = idx('function HubLibrary:RegisterTheme(')
 replace_range(a, b, r'''function HubLibrary:_Hover(button, normalKey, hoverKey)
@@ -151,11 +151,11 @@ end
 
 ''')
 
-# ---------------------------------------------------------------- SetTheme
+ ---------------------------------------------------------------- SetTheme
 sub('\tself._themeName = name or "Custom"\n\tself:_ApplyTheme()',
     '\tself._themeName = name or "Custom"\n\tif name then\n\t\tself._baseThemeName = name\n\tend\n\tself._accentColor = nil\n\tself:_ApplyTheme()')
 
-# ---------------------------------------------------------------- BuildUI
+ ---------------------------------------------------------------- BuildUI
 sub('\t\tSize = UDim2.fromOffset(WIN_W, WIN_H),\n\t\tBorderSizePixel = 0,\n\t\tActive = true,',
     '\t\tSize = UDim2.fromOffset(self._winW, self._winH),\n\t\tBorderSizePixel = 0,\n\t\tActive = true,')
 
@@ -224,11 +224,11 @@ popup = r'''	-- Fecha dropdown/color picker ao clicar fora -------------
 sub('\t-- Tecla de abrir/fechar --------------------------------\n',
     popup + '\t-- Tecla de abrir/fechar --------------------------------\n')
 
-# ---------------------------------------------------------------- Carregar
+ ---------------------------------------------------------------- Carregar
 sub('\tself._minToken = 0\n', '\tself._minToken = 0\n\tself._winW = WIN_W\n\tself._winH = WIN_H\n')
 sub('\tself._themeName = themeName\n', '\tself._themeName = themeName\n\tself._baseThemeName = themeName\n')
 
-# ---------------------------------------------------------------- janela
+ ---------------------------------------------------------------- janela
 sub('self:Tween(self.BackGround, { Size = UDim2.fromOffset(WIN_W, TOP_H + 4) }, 0.18)',
     'self:Tween(self.BackGround, { Size = UDim2.fromOffset(self._winW, TOP_H + 4) }, 0.18)')
 sub('self:Tween(self.BackGround, { Size = UDim2.fromOffset(WIN_W, WIN_H) }, 0.18)',
@@ -238,7 +238,7 @@ sub('\tself._minButton.Text = minimize and "+" or "_"\n',
 sub('view.X / (WIN_W + 60), view.Y / (WIN_H + 60)',
     'view.X / (self._winW + 60), view.Y / (self._winH + 60)')
 
-# ---------------------------------------------------------------- busca
+ ---------------------------------------------------------------- busca
 a = idx('function HubLibrary:_ApplySearch()')
 b = idx('function HubLibrary:SetSearchEnabled(')
 replace_range(a, b, r'''function HubLibrary:_SearchQuery()
@@ -281,7 +281,7 @@ end
 sub('\tentry.Object.Visible = entry.Visible and not entry.ForceHidden\n\treturn not entry.ForceHidden',
     '\tself:_ApplyEntry(entry, self:_SearchQuery())\n\treturn not entry.ForceHidden')
 
-# ---------------------------------------------------------------- AddTab
+ ---------------------------------------------------------------- AddTab
 a = idx('function HubLibrary:AddTab(')
 b = idx('function Tab:_StyleButton(')
 replace_range(a, b, r'''function HubLibrary:AddTab(nomeDaAba, icone)
@@ -292,7 +292,7 @@ replace_range(a, b, r'''function HubLibrary:AddTab(nomeDaAba, icone)
 
 	local button = New("TextButton", {
 		Name = nomeDaAba .. "Button",
-		LayoutOrder = #self.Abas + 1,
+		LayoutOrder = self.Abas + 1,
 		Size = UDim2.new(1, 0, 0, 38),
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
@@ -377,7 +377,7 @@ replace_range(a, b, r'''function HubLibrary:AddTab(nomeDaAba, icone)
 	end)
 
 	table.insert(self.Abas, tab)
-	if #self.Abas == 1 then
+	if self.Abas == 1 then
 		self:SelecionarAba(tab)
 	end
 	return tab
@@ -385,7 +385,7 @@ end
 
 ''')
 
-# ---------------------------------------------------------------- Register
+ ---------------------------------------------------------------- Register
 sub('\tlocal stateKey = opts.StateKey and tostring(opts.StateKey) or nil\n', r'''	if opts.TitleLabel and not control.SetTitle then
 		local titleLabel = opts.TitleLabel
 		control.SetTitle = function(_, text)
@@ -411,7 +411,7 @@ sub('''	if hub._searchQuery ~= "" then
 	hub:_ApplyEntry(entry, hub:_SearchQuery())
 	return control''')
 
-# TitleLabel nos controles existentes
+ TitleLabel nos controles existentes
 sub('\tself:_Title(card, texto, -84)\n', '\tlocal titleLabel = self:_Title(card, texto, -84)\n')
 sub('\t\tDefault = active,\n\t\tStateKey = stateKey,\n\t})', '\t\tDefault = active,\n\t\tStateKey = stateKey,\n\t\tTitleLabel = titleLabel,\n\t})')
 sub('\t\tDefault = value,\n\t\tStateKey = stateKey,\n\t})', '\t\tDefault = value,\n\t\tStateKey = stateKey,\n\t\tTitleLabel = title,\n\t})')
@@ -422,7 +422,7 @@ sub('return self:_Register(control, "Button", texto, { Description = descricao }
 sub('return self:_Register(control, "Label", text, { Persist = false })',
     'return self:_Register(control, "Label", text, { Persist = false, TitleLabel = title })')
 
-# ---------------------------------------------------------------- Dropdown
+ ---------------------------------------------------------------- Dropdown
 a = idx('function Tab:AddDropdown(')
 b = header_start('-- INFO CARD')
 replace_range(a, b, r'''function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, stateKey, multi)
@@ -609,14 +609,14 @@ replace_range(a, b, r'''function Tab:AddDropdown(texto, opcoes, callback, valorI
 	end
 
 	local function resize()
-		local hasSearch = #options >= SEARCH_MIN
+		local hasSearch = options >= SEARCH_MIN
 		searchBox.Visible = hasSearch
 		local top = hasSearch and SEARCH_ROW or 0
 		local listHeight = math.min(visibleCount(), MAX_ROWS) * ROW_H
 		list.Position = UDim2.fromOffset(0, top)
 		list.Size = UDim2.new(1, 0, 0, listHeight)
 		panel.Size = UDim2.new(1, -24, 0, top + listHeight)
-		panel.Visible = opened and #options > 0
+		panel.Visible = opened and options > 0
 		arrow.Text = opened and "^" or "v"
 		local target = opened and (CARD_H + top + listHeight + 10) or CARD_H
 		hub:Tween(card, { Size = UDim2.new(1, 0, 0, target) }, 0.16)
@@ -639,7 +639,7 @@ replace_range(a, b, r'''function Tab:AddDropdown(texto, opcoes, callback, valorI
 	end
 
 	local function openSelf()
-		if #options == 0 then
+		if options == 0 then
 			return
 		end
 		hub:_SetPopup(closeSelf, card)
@@ -798,7 +798,7 @@ replace_range(a, b, r'''function Tab:AddDropdown(texto, opcoes, callback, valorI
 		elseif current ~= nil and not table.find(options, current) then
 			current = options[1]
 		end
-		if #options == 0 then
+		if options == 0 then
 			opened = false
 		end
 		searchBox.Text = ""
@@ -822,7 +822,7 @@ end
 
 ''')
 
-# ---------------------------------------------------------------- Section
+ ---------------------------------------------------------------- Section
 a = idx('function Tab:AddSection(')
 b = idx('function Tab:AddLabel(')
 replace_range(a, b, r'''function Tab:AddSection(title, subtitle, colapsavel, iniciarFechada)
@@ -938,7 +938,7 @@ end
 
 ''')
 
-# ---------------------------------------------------------------- Profiles
+ ---------------------------------------------------------------- Profiles
 a = idx('function HubLibrary:SaveProfile(')
 b = header_start('-- ABA DE CONFIG PADRAO')
 replace_range(a, b, r'''function HubLibrary:SaveProfile(name)
@@ -1035,7 +1035,7 @@ end
 
 ''')
 
-# ---------------------------------------------------------------- Config tab
+ ---------------------------------------------------------------- Config tab
 a = idx('function HubLibrary:_BuildConfigTab()')
 b = idx('function HubLibrary:OpenConfig()')
 replace_range(a, b, r'''function HubLibrary:_BuildConfigTab()
@@ -1139,7 +1139,7 @@ end
 
 ''')
 
-# ---------------------------------------------------------------- Snapshot / Restore
+ ---------------------------------------------------------------- Snapshot / Restore
 sub('\t\tTheme = self._themeName,\n\t\tMenuKey = self._menuKey and self._menuKey.Name or nil,',
     '\t\tTheme = self._baseThemeName or self._themeName,\n\t\tAccent = self._accentColor and ColorToTable(self._accentColor) or nil,\n\t\tSize = { self._winW, self._winH },\n\t\tMenuKey = self._menuKey and self._menuKey.Name or nil,')
 
@@ -1158,7 +1158,7 @@ sub('''	if snapshot.MenuKey then
 		self:SetSize(snapshot.Size[1], snapshot.Size[2])
 	end''')
 
-# ---------------------------------------------------------------- novos metodos
+ ---------------------------------------------------------------- novos metodos
 assert s.rstrip().endswith('return HubLibrary')
 s = s.rstrip()[:-len('return HubLibrary')].rstrip() + '\n\n'
 
@@ -1745,7 +1745,7 @@ function HubLibrary:SelfTest()
 	try("dropdown multi", function()
 		local c = tab:AddDropdown("M", { "A", "B", "C" }, nil, { "A" }, nil, nil, true)
 		c:Set({ "B", "C" }, true)
-		check("multi Set/Get", #c:Get() == 2)
+		check("multi Set/Get", c:Get() == 2)
 	end)
 
 	try("textbox", function()
@@ -1801,8 +1801,8 @@ function HubLibrary:SelfTest()
 			warn("[Frank Hub] SelfTest FALHOU:", result.Name)
 		end
 	end
-	print(string.format("[Frank Hub] SelfTest: %d/%d ok", passed, #results))
-	return passed == #results, results
+	print(string.format("[Frank Hub] SelfTest: %d/%d ok", passed, results))
+	return passed == results, results
 end
 
 return HubLibrary
