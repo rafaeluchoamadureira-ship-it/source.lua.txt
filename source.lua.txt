@@ -1,1373 +1,1296 @@
-local HubLibrary = {}
-HubLibrary.__index = HubLibrary
+--==================================================
+-- FRANK HUB LIBRARY v3.1
+--
+-- Reescrita da v3.0 mantendo a mesma API:
+--   Library.Carregar(nome) -> hub
+--   hub:AddTab(nome) -> tab
+--   tab:AddToggle / AddSlider / AddDropdown / AddInfoCard / AddButton
+--   tab:AddKeybind / AddSection / AddLabel / AddSpacer / AddCustom
+--   hub:Notify / SetTheme / SaveConfig / LoadConfig / On / SetState ...
+--
+-- A interface e construida 100% por codigo (nao depende de
+-- .rbxm nem de ModuleScript no jogo).
+--==================================================
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
+local Global = (type(getgenv) == "function" and getgenv()) or _G
 
---==================================================
--- HUBLIBRARY ADAPTADA PARA A INTERFACE FEITA A MAO
---
--- Hierarquia esperada:
---
--- Menu Hub [ScreenGui]
--- └─ BackGround [Frame]
---    ├─ BackGroundTop [Frame]
---    ├─ TabButtonsFrame [Frame]
---    │  ├─ UIListLayout
---    │  └─ Aba1 [TextButton]
---    ├─ ScrollingFrame [ScrollingFrame]
---    │  ├─ UIListLayout
---    │  └─ Templates [Folder]
---    │     ├─ InfoCardTemplate [Frame]
---    │     ├─ ToggleTemplate [Frame]
---    │     ├─ DropdownTemplate [Frame]
---    │     └─ SliderTemplate [Frame]
---    ├─ Close [TextButton]
---    ├─ TabButtonsFrame [Frame]
---    │  ├─ UIListLayout
---    │  ├─ DiscordButton [TextButton]
---    │  └─ ConfigButton [TextButton]
---    └─ MenuName [TextLabel]
---
--- Observacao:
--- Ha DOIS TabButtonsFrame com o mesmo nome.
--- A biblioteca encontra o primeiro pela presenca de "Aba1"
--- e trata o outro como a barra de botoes fixos.
---
--- Os templates existentes no Studio sao usados como base visual.
--- A biblioteca NAO recria o design dos controles.
---==================================================
+local HubLibrary = {}
+HubLibrary.__index = HubLibrary
+HubLibrary.Version = "3.1"
 
-local COR_FUNDO = Color3.fromRGB(25, 25, 25)
-local COR_TOPO = Color3.fromRGB(215, 20, 20)
-local COR_BORDA = Color3.fromRGB(0, 0, 0)
-
-local COR_CARD = Color3.fromRGB(35, 35, 35)
-local COR_CONTROLE = Color3.fromRGB(20, 20, 20)
-local COR_VERDE = Color3.fromRGB(0, 235, 60)
-
-local TAMANHO_BORDA = 3
-
-local COR_TAB_NORMAL = Color3.fromRGB(40, 40, 40)
-local COR_TAB_TEXTO_NORMAL = Color3.fromRGB(200, 200, 200)
-local COR_TAB_TEXTO_ATIVA = Color3.fromRGB(255, 255, 255)
-
---==================================================
--- AUXILIARES
---==================================================
-
-local function AplicarBorda(parent, espessura)
-	if not parent then
-		return nil
+local Tab = {}
+-- Metodos da aba primeiro; se nao existir, delega ao hub
+-- (assim tab:Notify(), tab:SetTheme() etc. continuam funcionando).
+Tab.__index = function(_, key)
+	local own = rawget(Tab, key)
+	if own ~= nil then
+		return own
 	end
-
-	local stroke = parent:FindFirstChildOfClass("UIStroke")
-
-	if stroke then
-		if espessura then
-			stroke.Thickness = espessura
+	local hubMethod = HubLibrary[key]
+	if type(hubMethod) == "function" then
+		return function(selfTab, ...)
+			return hubMethod(selfTab._hub, ...)
 		end
-		return stroke
 	end
+	return nil
+end
 
-	stroke = Instance.new("UIStroke")
-	stroke.Thickness = espessura or TAMANHO_BORDA
-	stroke.Color = COR_BORDA
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+--==================================================
+-- CONSTANTES DE LAYOUT
+--==================================================
+
+local WIN_W, WIN_H = 534, 488
+local TOP_H = 46
+local PAD = 10
+local LEFT_W = 130
+local SEARCH_H = 30
+local FIXED_H = 70
+local CONTENT_TOP = PAD + 4
+
+--==================================================
+-- FONTES
+--==================================================
+
+local function MakeFont(family, weight)
+	local ok, font = pcall(Font.new, family, weight, Enum.FontStyle.Normal)
+	if ok and font then
+		return font
+	end
+	if weight == Enum.FontWeight.Regular then
+		return Font.fromEnum(Enum.Font.SourceSans)
+	end
+	return Font.fromEnum(Enum.Font.SourceSansBold)
+end
+
+local FONT_REG = MakeFont("rbxasset://fonts/families/SourceSansPro.json", Enum.FontWeight.Regular)
+local FONT_BOLD = MakeFont("rbxasset://fonts/families/SourceSansPro.json", Enum.FontWeight.Bold)
+local FONT_TITLE = MakeFont("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
+
+--==================================================
+-- TEMAS
+--==================================================
+
+local function rgb(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+
+local THEMES = {
+	Crimson = {
+		Background = rgb(0, 0, 0),
+		BackgroundTransparency = 0.5,
+		Top = rgb(234, 0, 8),
+		TopShadow = rgb(86, 0, 4),
+		Card = rgb(0, 0, 0),
+		CardTransparency = 0.45,
+		Control = rgb(12, 12, 12),
+		ControlHover = rgb(40, 40, 40),
+		Accent = rgb(234, 0, 8),
+		AccentHover = rgb(255, 35, 42),
+		Success = rgb(0, 255, 17),
+		Warning = rgb(255, 195, 0),
+		Danger = rgb(255, 70, 73),
+		Text = rgb(255, 255, 255),
+		MutedText = rgb(150, 150, 150),
+		Border = rgb(0, 0, 0),
+		Tooltip = rgb(15, 15, 15),
+	},
+	Purple = {
+		Background = rgb(10, 8, 15),
+		BackgroundTransparency = 0.08,
+		Top = rgb(132, 47, 255),
+		TopShadow = rgb(70, 20, 140),
+		Card = rgb(17, 14, 24),
+		CardTransparency = 0.1,
+		Control = rgb(22, 18, 31),
+		ControlHover = rgb(42, 35, 56),
+		Accent = rgb(160, 75, 255),
+		AccentHover = rgb(190, 120, 255),
+		Success = rgb(0, 240, 150),
+		Warning = rgb(255, 195, 0),
+		Danger = rgb(255, 80, 110),
+		Text = rgb(255, 255, 255),
+		MutedText = rgb(150, 145, 165),
+		Border = rgb(60, 30, 90),
+		Tooltip = rgb(20, 16, 27),
+	},
+	Midnight = {
+		Background = rgb(7, 12, 20),
+		BackgroundTransparency = 0.06,
+		Top = rgb(35, 95, 175),
+		TopShadow = rgb(15, 45, 90),
+		Card = rgb(10, 17, 28),
+		CardTransparency = 0.1,
+		Control = rgb(15, 24, 38),
+		ControlHover = rgb(30, 45, 68),
+		Accent = rgb(55, 135, 255),
+		AccentHover = rgb(90, 165, 255),
+		Success = rgb(0, 235, 155),
+		Warning = rgb(255, 195, 0),
+		Danger = rgb(255, 80, 95),
+		Text = rgb(245, 248, 255),
+		MutedText = rgb(140, 155, 175),
+		Border = rgb(20, 35, 55),
+		Tooltip = rgb(8, 14, 24),
+	},
+	Emerald = {
+		Background = rgb(5, 12, 10),
+		BackgroundTransparency = 0.06,
+		Top = rgb(0, 160, 105),
+		TopShadow = rgb(0, 80, 52),
+		Card = rgb(7, 20, 16),
+		CardTransparency = 0.1,
+		Control = rgb(11, 29, 23),
+		ControlHover = rgb(25, 48, 39),
+		Accent = rgb(0, 205, 135),
+		AccentHover = rgb(45, 235, 165),
+		Success = rgb(0, 255, 145),
+		Warning = rgb(255, 195, 0),
+		Danger = rgb(255, 80, 95),
+		Text = rgb(245, 255, 250),
+		MutedText = rgb(140, 170, 158),
+		Border = rgb(10, 60, 45),
+		Tooltip = rgb(7, 19, 15),
+	},
+}
+
+local function MergeTheme(base, custom)
+	local merged = {}
+	for key, value in pairs(base) do
+		merged[key] = value
+	end
+	for key, value in pairs(custom or {}) do
+		merged[key] = value
+	end
+	return merged
+end
+
+--==================================================
+-- FUNCOES AUXILIARES
+--==================================================
+
+local function New(className, props, parent)
+	local inst = Instance.new(className)
+	if props then
+		for key, value in pairs(props) do
+			inst[key] = value
+		end
+	end
+	if parent then
+		inst.Parent = parent
+	end
+	return inst
+end
+
+local function Corner(parent, radius)
+	return New("UICorner", { CornerRadius = UDim.new(0, radius or 5) }, parent)
+end
+
+local function Stroke(parent, thickness, color)
+	local stroke = New("UIStroke", {
+		Thickness = thickness or 2,
+		Color = color or Color3.new(0, 0, 0),
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+	pcall(function()
+		stroke.BorderStrokePosition = Enum.BorderStrokePosition.Outer
+	end)
 	stroke.Parent = parent
-
 	return stroke
 end
 
-local function Arredondar(parent, raio)
-	if not parent then
-		return nil
-	end
-
-	local corner = parent:FindFirstChildOfClass("UICorner")
-
-	if corner then
-		return corner
-	end
-
-	corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, raio or 6)
-	corner.Parent = parent
-
-	return corner
-end
-
-local function ExecutarCallback(callback, ...)
-	if typeof(callback) ~= "function" then
+local function Call(callback, ...)
+	if type(callback) ~= "function" then
 		return
 	end
-
 	local args = table.pack(...)
-
 	task.spawn(function()
-		local sucesso, erro = pcall(function()
-			callback(table.unpack(args, 1, args.n))
-		end)
-
-		if not sucesso then
-			warn("[HubLibrary] Erro no callback:", erro)
+		local ok, err = pcall(callback, table.unpack(args, 1, args.n))
+		if not ok then
+			warn("[Frank Hub] Callback:", err)
 		end
 	end)
 end
 
-local function NormalizarImagem(id)
-	if id == nil then
-		return "rbxassetid://0"
+local function DeepCopy(value)
+	if type(value) ~= "table" then
+		return value
 	end
-
-	local texto = tostring(id)
-
-	if texto == "" then
-		return "rbxassetid://0"
+	local copy = {}
+	for key, item in pairs(value) do
+		copy[key] = DeepCopy(item)
 	end
-
-	if string.find(texto, "rbxassetid://", 1, true) then
-		return texto
-	end
-
-	if string.find(texto, "rbxasset.com", 1, true) then
-		return texto
-	end
-
-	return "rbxassetid://" .. texto
+	return copy
 end
 
-local function Conectar(connections, signal, callback)
-	if not signal then
+local function IsJSONSafe(value, depth)
+	depth = depth or 0
+	if depth > 6 then
+		return false
+	end
+	local kind = type(value)
+	if kind == "boolean" or kind == "string" then
+		return true
+	end
+	if kind == "number" then
+		return value == value and value ~= math.huge and value ~= -math.huge
+	end
+	if kind == "table" then
+		for k, v in pairs(value) do
+			if type(k) ~= "string" and type(k) ~= "number" then
+				return false
+			end
+			if not IsJSONSafe(v, depth + 1) then
+				return false
+			end
+		end
+		return true
+	end
+	return false
+end
+
+local function Slug(text)
+	local s = string.lower(tostring(text))
+	s = s:gsub("[^%w]+", "_")
+	s = s:gsub("^_+", "")
+	s = s:gsub("_+$", "")
+	if s == "" then
+		s = "item"
+	end
+	return s
+end
+
+local function NormalizeKey(key)
+	if typeof(key) == "EnumItem" then
+		if key.EnumType == Enum.KeyCode then
+			return key
+		end
 		return nil
 	end
+	if type(key) == "string" then
+		local ok, result = pcall(function()
+			return Enum.KeyCode[key]
+		end)
+		if ok and typeof(result) == "EnumItem" then
+			return result
+		end
+	end
+	return nil
+end
 
+local function FileApiAvailable()
+	return type(isfile) == "function"
+		and type(readfile) == "function"
+		and type(writefile) == "function"
+end
+
+local function ToImage(id)
+	if type(id) == "number" then
+		return "rbxassetid://" .. tostring(id)
+	end
+	id = tostring(id or "")
+	if id == "" then
+		return "rbxasset://textures/ui/GuiImagePlaceholder.png"
+	end
+	if id:match("^%d+$") then
+		return "rbxassetid://" .. id
+	end
+	return id
+end
+
+--==================================================
+-- TEMA (objetos "tematizados")
+--==================================================
+
+function HubLibrary:_Themed(object, applyFn)
+	table.insert(self._themed, { Object = object, Apply = applyFn })
+	applyFn(self._theme)
+	return object
+end
+
+function HubLibrary:_T(object, property, themeKey)
+	return self:_Themed(object, function(theme)
+		object[property] = theme[themeKey]
+	end)
+end
+
+function HubLibrary:_ApplyTheme()
+	local alive = {}
+	for _, entry in ipairs(self._themed) do
+		if self.ScreenGui and entry.Object:IsDescendantOf(self.ScreenGui) then
+			table.insert(alive, entry)
+			local ok, err = pcall(entry.Apply, self._theme)
+			if not ok then
+				warn("[Frank Hub] Tema:", err)
+			end
+		end
+	end
+	self._themed = alive
+end
+
+function HubLibrary:_Conn(signal, callback)
 	local connection = signal:Connect(callback)
-	table.insert(connections, connection)
-
+	table.insert(self._conns, connection)
 	return connection
 end
 
-local function DesconectarLista(connections)
-	if not connections then
+function HubLibrary:_Hover(button, normalKey, hoverKey)
+	self:_Conn(button.MouseEnter, function()
+		self:Tween(button, { BackgroundColor3 = self._theme[hoverKey] }, 0.1)
+	end)
+	self:_Conn(button.MouseLeave, function()
+		self:Tween(button, { BackgroundColor3 = self._theme[normalKey] }, 0.1)
+	end)
+end
+
+function HubLibrary:RegisterTheme(name, theme)
+	if type(name) ~= "string" or type(theme) ~= "table" then
+		return false
+	end
+	self._themes[name] = MergeTheme(THEMES.Crimson, theme)
+	return true
+end
+
+function HubLibrary:GetThemes()
+	local names = {}
+	for name in pairs(self._themes) do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	return names
+end
+
+function HubLibrary:SetTheme(themeOrName)
+	local nextTheme, name
+	if type(themeOrName) == "string" then
+		nextTheme = self._themes[themeOrName]
+		name = themeOrName
+	elseif type(themeOrName) == "table" then
+		nextTheme = themeOrName
+	end
+	if type(nextTheme) ~= "table" then
+		return false
+	end
+	self._theme = MergeTheme(THEMES.Crimson, nextTheme)
+	self._themeName = name or "Custom"
+	self:_ApplyTheme()
+	self:Fire("ThemeChanged", self._theme, self._themeName)
+	return true
+end
+
+function HubLibrary:GetTheme()
+	return DeepCopy(self._theme)
+end
+
+--==================================================
+-- EVENTOS
+--==================================================
+
+function HubLibrary:On(eventName, callback)
+	if type(eventName) ~= "string" or type(callback) ~= "function" then
+		return nil
+	end
+	local list = self._events[eventName]
+	if not list then
+		list = {}
+		self._events[eventName] = list
+	end
+	local entry = { Callback = callback }
+	table.insert(list, entry)
+	return {
+		Disconnect = function()
+			local index = table.find(list, entry)
+			if index then
+				table.remove(list, index)
+			end
+		end,
+	}
+end
+
+function HubLibrary:Fire(eventName, ...)
+	local list = self._events[eventName]
+	if not list then
 		return
 	end
+	for _, entry in ipairs(table.clone(list)) do
+		Call(entry.Callback, ...)
+	end
+end
 
-	for _, connection in ipairs(connections) do
-		if typeof(connection) == "RBXScriptConnection" then
+--==================================================
+-- STATE
+--==================================================
+
+function HubLibrary:GetState(key, fallback)
+	local value = self._state[key]
+	if value == nil then
+		return fallback
+	end
+	return value
+end
+
+function HubLibrary:SetState(key, value, fireEvent)
+	local old = self._state[key]
+	self._state[key] = value
+	if old ~= value and fireEvent ~= false then
+		for _, listener in ipairs(table.clone(self._stateListeners[key] or {})) do
+			local ok, err = pcall(listener, value, old, key)
+			if not ok then
+				warn("[Frank Hub] State:", err)
+			end
+		end
+		self:Fire("StateChanged", key, value, old)
+	end
+	return value
+end
+
+function HubLibrary:BindState(key, callback)
+	if type(key) ~= "string" or type(callback) ~= "function" then
+		return nil
+	end
+	local list = self._stateListeners[key]
+	if not list then
+		list = {}
+		self._stateListeners[key] = list
+	end
+	table.insert(list, callback)
+	return {
+		Disconnect = function()
+			local index = table.find(list, callback)
+			if index then
+				table.remove(list, index)
+			end
+		end,
+	}
+end
+
+function HubLibrary:SubscribeState(key, callback)
+	return self:BindState(key, callback)
+end
+
+--==================================================
+-- ANIMACAO
+--==================================================
+
+function HubLibrary:SetAnimationsEnabled(enabled)
+	self._animations = enabled ~= false
+	return self._animations
+end
+
+function HubLibrary:Tween(object, properties, duration, easingStyle, easingDirection)
+	if not object or not object.Parent then
+		return nil
+	end
+	if self._animations == false then
+		for property, value in pairs(properties or {}) do
 			pcall(function()
-				connection:Disconnect()
+				object[property] = value
 			end)
 		end
+		return nil
 	end
-
-	table.clear(connections)
+	local tween = TweenService:Create(
+		object,
+		TweenInfo.new(
+			tonumber(duration) or 0.2,
+			easingStyle or Enum.EasingStyle.Quad,
+			easingDirection or Enum.EasingDirection.Out
+		),
+		properties or {}
+	)
+	tween:Play()
+	return tween
 end
 
-local function EncontrarTabFrame(backGround)
-	local candidatos = {}
+--==================================================
+-- NOTIFICACOES
+--==================================================
 
-	for _, child in ipairs(backGround:GetChildren()) do
-		if child:IsA("Frame") and child.Name == "TabButtonsFrame" then
-			table.insert(candidatos, child)
+function HubLibrary:Notify(title, message, duration, kind)
+	if self._destroyed or not self._notifHolder then
+		return nil
+	end
+
+	duration = tonumber(duration) or 3.5
+	local theme = self._theme
+	local colors = {
+		Success = theme.Success,
+		Warning = theme.Warning,
+		Error = theme.Danger,
+		Danger = theme.Danger,
+	}
+	local accent = colors[tostring(kind)] or theme.Accent
+
+	local holder = self._notifHolder
+	local existing = {}
+	for _, child in ipairs(holder:GetChildren()) do
+		if child:IsA("Frame") then
+			table.insert(existing, child)
 		end
 	end
+	if #existing >= 6 then
+		existing[1]:Destroy()
+	end
 
-	for _, frame in ipairs(candidatos) do
-		if frame:FindFirstChild("Aba1") then
-			return frame
+	self._notifCount = self._notifCount + 1
+
+	-- O wrapper e controlado pelo UIListLayout; o card interno e que anima.
+	local wrap = New("Frame", {
+		Name = "Notification",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 68),
+		LayoutOrder = self._notifCount,
+	}, holder)
+
+	local card = New("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		Position = UDim2.new(1, 40, 0, 0),
+		BackgroundColor3 = theme.Card,
+		BackgroundTransparency = 0.05,
+		BorderSizePixel = 0,
+		ZIndex = 901,
+	}, wrap)
+	Corner(card, 6)
+	Stroke(card, 2, accent)
+
+	local strip = New("Frame", {
+		Size = UDim2.new(0, 4, 1, 0),
+		BackgroundColor3 = accent,
+		BorderSizePixel = 0,
+		ZIndex = 902,
+	}, card)
+	Corner(strip, 3)
+
+	New("TextLabel", {
+		Name = "Title",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(14, 6),
+		Size = UDim2.new(1, -22, 0, 22),
+		Text = tostring(title or "Frank Hub"),
+		TextColor3 = theme.Text,
+		TextSize = 18,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 902,
+	}, card)
+
+	New("TextLabel", {
+		Name = "Message",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(14, 28),
+		Size = UDim2.new(1, -22, 0, 34),
+		Text = tostring(message or ""),
+		TextColor3 = theme.MutedText,
+		TextSize = 14,
+		FontFace = FONT_REG,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 902,
+	}, card)
+
+	self:Tween(card, { Position = UDim2.new(0, 0, 0, 0) }, 0.22, Enum.EasingStyle.Quint)
+
+	task.delay(math.max(0.25, duration), function()
+		if not wrap.Parent then
+			return
 		end
-	end
-
-	return candidatos[1]
-end
-
-local function EncontrarFrameFixos(backGround, tabFrame)
-	for _, child in ipairs(backGround:GetChildren()) do
-		if child:IsA("Frame")
-			and child.Name == "TabButtonsFrame"
-			and child ~= tabFrame then
-			return child
+		local tween = self:Tween(card, { Position = UDim2.new(1, 40, 0, 0) }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		if tween then
+			tween.Completed:Connect(function()
+				wrap:Destroy()
+			end)
+		else
+			wrap:Destroy()
 		end
-	end
+	end)
 
-	return nil
+	return card
 end
 
-local function EncontrarTemplate(templates, nome)
-	if not templates then
-		return nil
-	end
+--==================================================
+-- TOOLTIP
+--==================================================
 
-	local object = templates:FindFirstChild(nome)
-
-	if object and object:IsA("GuiObject") then
-		return object
-	end
-
-	return nil
-end
-
-local function EncontrarTitulo(template)
-	if not template then
-		return nil
-	end
-
-	local title = template:FindFirstChild("TitleLabel")
-
-	if title and title:IsA("TextLabel") then
-		return title
-	end
-
-	return template:FindFirstChildWhichIsA("TextLabel", true)
-end
-
-local function EncontrarToggleButton(template)
-	if not template then
-		return nil
-	end
-
-	local button = template:FindFirstChild("ToggleButton")
-
-	if button and button:IsA("TextButton") then
-		return button
-	end
-
-	return template:FindFirstChildWhichIsA("TextButton", true)
-end
-
-local function EncontrarDropdownButton(template)
-	if not template then
-		return nil
-	end
-
-	-- Na hierarquia informada, o TextButton se chama "Frame".
-	local button = template:FindFirstChild("Frame")
-
-	if button and button:IsA("TextButton") then
-		return button
-	end
-
-	return template:FindFirstChildWhichIsA("TextButton", true)
-end
-
-local function EncontrarDropdownTexto(button)
-	if not button then
-		return nil
-	end
-
-	local label = button:FindFirstChild("TextLabel")
-
-	if label and label:IsA("TextLabel") then
-		return label
-	end
-
-	for _, child in ipairs(button:GetChildren()) do
-		if child:IsA("TextLabel") then
-			return child
-		end
-	end
-
-	return nil
-end
-
-local function EsconderTemplates(templates)
-	if not templates then
+function HubLibrary:_PlaceTooltip()
+	local tooltip = self._tooltip
+	if not tooltip or not tooltip.Visible then
 		return
 	end
-
-	for _, child in ipairs(templates:GetChildren()) do
-		if child:IsA("GuiObject") then
-			child.Visible = false
-		end
+	local mouse = UserInputService:GetMouseLocation()
+	local view = self.ScreenGui.AbsoluteSize
+	local size = tooltip.AbsoluteSize
+	local x = mouse.X + 14
+	local y = mouse.Y + 14
+	if x + size.X > view.X then
+		x = math.max(0, mouse.X - size.X - 8)
 	end
+	if y + size.Y > view.Y then
+		y = math.max(0, mouse.Y - size.Y - 8)
+	end
+	tooltip.Position = UDim2.fromOffset(x, y)
 end
 
-local function CopiarAparenciaScrolling(origem, destino)
-	destino.Size = origem.Size
-	destino.Position = origem.Position
-	destino.AnchorPoint = origem.AnchorPoint
-	destino.BackgroundColor3 = origem.BackgroundColor3
-	destino.BackgroundTransparency = origem.BackgroundTransparency
-	destino.BorderColor3 = origem.BorderColor3
-	destino.BorderSizePixel = origem.BorderSizePixel
-	destino.ClipsDescendants = origem.ClipsDescendants
-	destino.LayoutOrder = origem.LayoutOrder
-	destino.ScrollBarImageColor3 = origem.ScrollBarImageColor3
-	destino.ScrollBarImageTransparency = origem.ScrollBarImageTransparency
-	destino.ScrollBarThickness = origem.ScrollBarThickness
-	destino.ScrollBarImageTransparency = origem.ScrollBarImageTransparency
-	destino.ScrollingDirection = origem.ScrollingDirection
-	destino.AutomaticCanvasSize = Enum.AutomaticSize.None
-	destino.CanvasSize = UDim2.new(0, 0, 0, 0)
-	destino.Visible = false
+function HubLibrary:AddTooltip(object, text)
+	if self._destroyed or not object or not text then
+		return nil
+	end
+	local target = object
+	if type(object) == "table" then
+		target = object.Object
+	end
+	if typeof(target) ~= "Instance" or not target:IsA("GuiObject") then
+		return nil
+	end
 
-	pcall(function()
-		destino.BottomImage = origem.BottomImage
-	end)
-
-	pcall(function()
-		destino.MidImage = origem.MidImage
-	end)
-
-	pcall(function()
-		destino.TopImage = origem.TopImage
-	end)
-end
-
-local function CriarPagina(baseScrolling, backGround, nome)
-	local page = Instance.new("ScrollingFrame")
-	page.Name = tostring(nome) .. "Scroll"
-	page.Parent = backGround
-
-	CopiarAparenciaScrolling(baseScrolling, page)
-
-	for _, child in ipairs(baseScrolling:GetChildren()) do
-		if child:IsA("UIPadding") then
-			local padding = child:Clone()
-			padding.Parent = page
+	self:_Conn(target.MouseEnter, function()
+		if self._destroyed or not self._tooltip then
+			return
 		end
-	end
-
-	local layoutBase = baseScrolling:FindFirstChildOfClass("UIListLayout")
-	local layout = Instance.new("UIListLayout")
-
-	if layoutBase then
-		layout.Padding = layoutBase.Padding
-		layout.FillDirection = layoutBase.FillDirection
-		layout.HorizontalAlignment = layoutBase.HorizontalAlignment
-		layout.VerticalAlignment = layoutBase.VerticalAlignment
-		layout.SortOrder = layoutBase.SortOrder
-		layout.Wraps = layoutBase.Wraps
-	else
-		layout.Padding = UDim.new(0, 10)
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-	end
-
-	layout.Parent = page
-
-	return page, layout
+		self._tooltipText.Text = tostring(text)
+		self._tooltip.Visible = true
+		self:_PlaceTooltip()
+	end)
+	self:_Conn(target.MouseLeave, function()
+		if self._tooltip then
+			self._tooltip.Visible = false
+		end
+	end)
+	return target
 end
 
 --==================================================
--- CARREGAR A INTERFACE EXISTENTE
+-- CONSTRUCAO DA INTERFACE
 --==================================================
 
-function HubLibrary.Carregar(nomeDoHub, screenGuiOpcional)
+function HubLibrary:_BuildUI(nomeDoHub)
+	local gui = New("ScreenGui", {
+		Name = "Menu Hub",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 100,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	})
+	self.ScreenGui = gui
+
+	-- Janela ------------------------------------------------
+	local win = New("Frame", {
+		Name = "BackGround",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.fromScale(0.5, 0.1),
+		Size = UDim2.fromOffset(WIN_W, WIN_H),
+		BorderSizePixel = 0,
+		Active = true,
+		ClipsDescendants = true,
+	}, gui)
+	self.BackGround = win
+	Corner(win, 6)
+	local winStroke = Stroke(win, 3)
+	self:_Themed(win, function(t)
+		win.BackgroundColor3 = t.Background
+		win.BackgroundTransparency = t.BackgroundTransparency
+		winStroke.Color = t.Border
+	end)
+
+	self._uiScale = New("UIScale", { Name = "FrankResponsiveScale" }, win)
+
+	-- Barra superior ---------------------------------------
+	local top = New("Frame", {
+		Name = "BackGroundTop",
+		Size = UDim2.new(1, 0, 0, TOP_H),
+		BorderSizePixel = 0,
+	}, win)
+	Corner(top, 6)
+	local topFill = New("Frame", {
+		Name = "TopFill",
+		Position = UDim2.new(0, 0, 1, -8),
+		Size = UDim2.new(1, 0, 0, 8),
+		BorderSizePixel = 0,
+	}, top)
+	local topShadow = New("Frame", {
+		Name = "TopShadow",
+		Position = UDim2.fromOffset(0, TOP_H),
+		Size = UDim2.new(1, 0, 0, 4),
+		BorderSizePixel = 0,
+	}, win)
+	self:_Themed(top, function(t)
+		top.BackgroundColor3 = t.Top
+		topFill.BackgroundColor3 = t.Top
+		topShadow.BackgroundColor3 = t.TopShadow
+	end)
+
+	local menuName = New("TextLabel", {
+		Name = "MenuName",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(14, 0),
+		Size = UDim2.new(1, -100, 1, 0),
+		Text = tostring(nomeDoHub or "Frank Hub"),
+		TextSize = 22,
+		FontFace = FONT_TITLE,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, top)
+	self:_T(menuName, "TextColor3", "Text")
+	self.MenuName = menuName
+
+	local function TopButton(name, text, xOffset, colorKey)
+		local button = New("TextButton", {
+			Name = name,
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, xOffset, 0.5, 0),
+			Size = UDim2.fromOffset(30, 26),
+			BorderSizePixel = 0,
+			AutoButtonColor = false,
+			Text = text,
+			TextSize = 18,
+			FontFace = FONT_TITLE,
+		}, top)
+		Corner(button, 4)
+		local stroke = Stroke(button, 2)
+		self:_Themed(button, function(t)
+			button.BackgroundColor3 = t[colorKey]
+			button.TextColor3 = t.Text
+			stroke.Color = t.Border
+		end)
+		self:_Conn(button.MouseEnter, function()
+			self:Tween(button, { BackgroundTransparency = 0.25 }, 0.1)
+		end)
+		self:_Conn(button.MouseLeave, function()
+			self:Tween(button, { BackgroundTransparency = 0 }, 0.1)
+		end)
+		return button
+	end
+
+	local closeButton = TopButton("Close", "X", -10, "Danger")
+	local minButton = TopButton("Minimize", "_", -46, "Control")
+	self.CloseButton = closeButton
+	self._minButton = minButton
+
+	self:_Conn(closeButton.MouseButton1Click, function()
+		self:SetVisible(false)
+	end)
+	self:_Conn(minButton.MouseButton1Click, function()
+		self:Minimizar()
+	end)
+
+	-- Corpo -----------------------------------------------
+	local body = New("Frame", {
+		Name = "Body",
+		Position = UDim2.fromOffset(0, TOP_H),
+		Size = UDim2.new(1, 0, 1, -TOP_H),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+	}, win)
+	self._body = body
+
+	-- Coluna esquerda: abas
+	local tabList = New("ScrollingFrame", {
+		Name = "TabButtonsFrame",
+		Position = UDim2.fromOffset(PAD, CONTENT_TOP),
+		Size = UDim2.new(0, LEFT_W, 1, -(CONTENT_TOP + PAD + FIXED_H + 8)),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 0,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+	}, body)
+	New("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, tabList)
+	self.TabButtonsFrame = tabList
+	self._tabList = tabList
+
+	-- Coluna esquerda: botoes fixos (Discord / Config)
+	local fixed = New("Frame", {
+		Name = "FixedButtonsFrame",
+		Position = UDim2.new(0, PAD, 1, -(PAD + FIXED_H)),
+		Size = UDim2.fromOffset(LEFT_W, FIXED_H),
+		BackgroundTransparency = 1,
+	}, body)
+	New("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, fixed)
+	self.FixedButtonsFrame = fixed
+
+	local function FixedButton(name, text, order)
+		local button = New("TextButton", {
+			Name = name,
+			LayoutOrder = order,
+			Size = UDim2.new(1, 0, 0, 32),
+			BorderSizePixel = 0,
+			AutoButtonColor = false,
+			Text = text,
+			TextSize = 19,
+			FontFace = FONT_BOLD,
+		}, fixed)
+		Corner(button, 5)
+		local stroke = Stroke(button, 2)
+		self:_Themed(button, function(t)
+			button.BackgroundColor3 = t.Accent
+			button.TextColor3 = t.Text
+			stroke.Color = t.Border
+		end)
+		self:_Hover(button, "Accent", "AccentHover")
+		return button
+	end
+
+	local discordButton = FixedButton("DiscordButton", "Discord", 1)
+	local configButton = FixedButton("ConfigButton", "Config", 2)
+
+	self:_Conn(discordButton.MouseButton1Click, function()
+		if self.OnDiscord then
+			Call(self.OnDiscord)
+		else
+			self:Notify("Discord", "Nenhum link configurado.", 2.5, "Warning")
+		end
+	end)
+	self:_Conn(configButton.MouseButton1Click, function()
+		self:OpenConfig()
+	end)
+
+	-- Area de conteudo
+	local contentX = PAD * 2 + LEFT_W
+	local content = New("Frame", {
+		Name = "Content",
+		Position = UDim2.fromOffset(contentX, CONTENT_TOP),
+		Size = UDim2.new(1, -(contentX + PAD), 1, -(CONTENT_TOP + PAD)),
+		BackgroundTransparency = 1,
+	}, body)
+
+	local searchFrame = New("Frame", {
+		Name = "FrankSearch",
+		Size = UDim2.new(1, 0, 0, SEARCH_H),
+		BorderSizePixel = 0,
+	}, content)
+	Corner(searchFrame, 5)
+	local searchStroke = Stroke(searchFrame, 2)
+	local searchBox = New("TextBox", {
+		Name = "Input",
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -20, 1, 0),
+		BackgroundTransparency = 1,
+		ClearTextOnFocus = false,
+		PlaceholderText = "Pesquisar...",
+		Text = "",
+		TextSize = 16,
+		FontFace = FONT_REG,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, searchFrame)
+	self:_Themed(searchFrame, function(t)
+		searchFrame.BackgroundColor3 = t.Control
+		searchStroke.Color = t.Border
+		searchBox.TextColor3 = t.Text
+		searchBox.PlaceholderColor3 = t.MutedText
+	end)
+	self._searchFrame = searchFrame
+	self._searchInput = searchBox
+
+	self:_Conn(searchBox:GetPropertyChangedSignal("Text"), function()
+		self._searchQuery = searchBox.Text
+		self:_ApplySearch()
+		self:Fire("SearchChanged", searchBox.Text)
+	end)
+
+	local pages = New("Frame", {
+		Name = "Pages",
+		Position = UDim2.fromOffset(0, SEARCH_H + 8),
+		Size = UDim2.new(1, 0, 1, -(SEARCH_H + 8)),
+		BackgroundTransparency = 1,
+		ClipsDescendants = true,
+	}, content)
+	self._pages = pages
+
+	-- Botao flutuante (reabrir menu, util no mobile) ------
+	local fab = New("TextButton", {
+		Name = "FloatingToggle",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 10, 0.5, 0),
+		Size = UDim2.fromOffset(44, 44),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = "F",
+		TextSize = 22,
+		FontFace = FONT_TITLE,
+		Visible = false,
+		ZIndex = 50,
+	}, gui)
+	Corner(fab, 22)
+	local fabStroke = Stroke(fab, 2)
+	self:_Themed(fab, function(t)
+		fab.BackgroundColor3 = t.Accent
+		fab.TextColor3 = t.Text
+		fabStroke.Color = t.Border
+	end)
+	self:_Hover(fab, "Accent", "AccentHover")
+	self:_Conn(fab.MouseButton1Click, function()
+		self:SetVisible(true)
+	end)
+	self._fab = fab
+
+	-- Notificacoes -----------------------------------------
+	local holder = New("Frame", {
+		Name = "FrankNotifications",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -20, 1, -20),
+		Size = UDim2.fromOffset(320, 420),
+		BackgroundTransparency = 1,
+		ZIndex = 900,
+	}, gui)
+	New("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Bottom,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, holder)
+	self._notifHolder = holder
+
+	-- Tooltip ----------------------------------------------
+	local tooltip = New("Frame", {
+		Name = "FrankTooltip",
+		AutomaticSize = Enum.AutomaticSize.XY,
+		Size = UDim2.fromOffset(0, 0),
+		BorderSizePixel = 0,
+		Visible = false,
+		ZIndex = 1000,
+	}, gui)
+	Corner(tooltip, 5)
+	local tooltipStroke = Stroke(tooltip, 2)
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+		PaddingTop = UDim.new(0, 5),
+		PaddingBottom = UDim.new(0, 5),
+	}, tooltip)
+	local tooltipText = New("TextLabel", {
+		Name = "Text",
+		AutomaticSize = Enum.AutomaticSize.XY,
+		Size = UDim2.fromOffset(0, 0),
+		BackgroundTransparency = 1,
+		TextSize = 14,
+		FontFace = FONT_REG,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 1001,
+	}, tooltip)
+	New("UISizeConstraint", { MaxSize = Vector2.new(240, math.huge) }, tooltipText)
+	self:_Themed(tooltip, function(t)
+		tooltip.BackgroundColor3 = t.Tooltip
+		tooltipStroke.Color = t.Border
+		tooltipText.TextColor3 = t.Text
+	end)
+	self._tooltip = tooltip
+	self._tooltipText = tooltipText
+
+	self:_Conn(UserInputService.InputChanged, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			self:_PlaceTooltip()
+		end
+	end)
+
+	-- Arrastar a janela -------------------------------------
+	-- A posicao e sempre em escala pura, assim o arraste continua
+	-- correto mesmo com o UIScale responsivo ativo.
+	local dragInput, dragStart, dragOrigin
+
+	self:_Conn(top.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+			dragStart = input.Position
+			dragOrigin = Vector2.new(win.AbsolutePosition.X + win.AbsoluteSize.X * 0.5, win.AbsolutePosition.Y)
+		end
+	end)
+
+	self:_Conn(UserInputService.InputChanged, function(input)
+		if self._destroyed or not dragInput then
+			return
+		end
+		local isMove
+		if dragInput.UserInputType == Enum.UserInputType.Touch then
+			isMove = input == dragInput
+		else
+			isMove = input.UserInputType == Enum.UserInputType.MouseMovement
+		end
+		if not isMove then
+			return
+		end
+		local view = gui.AbsoluteSize
+		if view.X <= 0 or view.Y <= 0 then
+			return
+		end
+		local delta = input.Position - dragStart
+		local nx = (dragOrigin.X + delta.X) / view.X
+		local ny = (dragOrigin.Y + delta.Y) / view.Y
+		win.Position = UDim2.fromScale(math.clamp(nx, 0, 1), math.clamp(ny, 0, 0.95))
+	end)
+
+	self:_Conn(UserInputService.InputEnded, function(input)
+		if not dragInput then
+			return
+		end
+		if input == dragInput
+			or (dragInput.UserInputType == Enum.UserInputType.MouseButton1
+				and input.UserInputType == Enum.UserInputType.MouseButton1) then
+			dragInput = nil
+		end
+	end)
+
+	-- Escala responsiva ------------------------------------
+	self:_Conn(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
+		self:SetResponsive(self._responsiveEnabled)
+	end)
+
+	-- Tecla de abrir/fechar --------------------------------
+	self:_Conn(UserInputService.InputBegan, function(input, processed)
+		if self._destroyed or processed or self._capturingKey then
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.Keyboard
+			and self._menuKey
+			and input.KeyCode == self._menuKey then
+			self:SetVisible(not self.BackGround.Visible)
+		end
+	end)
+end
+
+--==================================================
+-- CARREGAR / DESTROY
+--==================================================
+
+function HubLibrary.Carregar(nomeDoHub, opcoes)
+	opcoes = type(opcoes) == "table" and opcoes or {}
+
+	-- Remove uma instancia anterior mesmo que tenha sido criada por
+	-- outra execucao do loader (a tabela da biblioteca muda a cada execucao).
+	local previous = Global.FrankHubActive
+	if type(previous) == "table" and type(previous.Destroy) == "function" then
+		pcall(function()
+			previous:Destroy()
+		end)
+	end
+	Global.FrankHubActive = nil
+
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+	local stale = playerGui:FindFirstChild("Menu Hub")
+	if stale then
+		stale:Destroy()
+	end
+
 	local self = setmetatable({}, HubLibrary)
-
 	self.Abas = {}
 	self.AbaAtiva = nil
+	self.Version = HubLibrary.Version
+	self.OnDiscord = nil
+	self.ConfigCallback = nil
+	self.ConfigTab = nil
+
 	self._destroyed = false
-	self._connections = {}
-	self._itemConnections = {}
+	self._conns = {}
+	self._themed = {}
+	self._themes = {}
+	self._registry = {}
+	self._registryById = {}
+	self._state = {}
+	self._stateListeners = {}
+	self._events = {}
+	self._profiles = {}
+	self._notifCount = 0
+	self._searchQuery = ""
+	self._searchEnabled = true
+	self._animations = opcoes.Animations ~= false
+	self._responsiveEnabled = opcoes.Responsive ~= false
+	self._minimized = false
+	self._minToken = 0
+	self._autoSave = false
+	self._configFile = "FrankHub_Default.json"
+	self._menuKey = NormalizeKey(opcoes.MenuKey) or Enum.KeyCode.RightShift
 
-	local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-	local ScreenGui = screenGuiOpcional
-
-	if not ScreenGui then
-		ScreenGui = PlayerGui:FindFirstChild("Menu Hub")
+	for name, theme in pairs(THEMES) do
+		self._themes[name] = MergeTheme(THEMES.Crimson, theme)
 	end
+	local themeName = (type(opcoes.Theme) == "string" and self._themes[opcoes.Theme]) and opcoes.Theme or "Crimson"
+	self._themeName = themeName
+	self._theme = self._themes[themeName]
 
-	if not ScreenGui then
-		error('[HubLibrary] "Menu Hub" nao foi encontrada no PlayerGui.')
-	end
+	self:_BuildUI(nomeDoHub)
+	self.ScreenGui.Parent = playerGui
+	self:SetResponsive(self._responsiveEnabled)
 
-	if not ScreenGui:IsA("ScreenGui") then
-		error('[HubLibrary] "Menu Hub" precisa ser uma ScreenGui.')
-	end
+	Global.FrankHubActive = self
+	HubLibrary._Active = self
 
-	local BackGround = ScreenGui:FindFirstChild("BackGround")
-
-	if not BackGround or not BackGround:IsA("Frame") then
-		error('[HubLibrary] "BackGround" nao encontrada.')
-	end
-
-	local ScrollingFrame = BackGround:FindFirstChild("ScrollingFrame")
-
-	if not ScrollingFrame or not ScrollingFrame:IsA("ScrollingFrame") then
-		error('[HubLibrary] "ScrollingFrame" nao encontrada.')
-	end
-
-	local Templates = ScrollingFrame:FindFirstChild("Templates")
-
-	if not Templates or not Templates:IsA("Folder") then
-		error('[HubLibrary] "Templates" nao encontrada dentro de ScrollingFrame.')
-	end
-
-	local TabButtonsFrame = EncontrarTabFrame(BackGround)
-
-	if not TabButtonsFrame then
-		error('[HubLibrary] O primeiro "TabButtonsFrame" nao foi encontrado.')
-	end
-
-	local FixedButtonsFrame =
-		EncontrarFrameFixos(BackGround, TabButtonsFrame)
-
-	self.ScreenGui = ScreenGui
-	self.BackGround = BackGround
-	self.Templates = Templates
-	self.TemplateScrollingFrame = ScrollingFrame
-	self.TabButtonsFrame = TabButtonsFrame
-	self.FixedButtonsFrame = FixedButtonsFrame
-
-	--==================================================
-	-- IMPORTANTE:
-	-- O ScrollingFrame original fica escondido.
-	-- Ele funciona como base visual para as paginas.
-	--==================================================
-
-	ScrollingFrame.Visible = false
-	EsconderTemplates(Templates)
-
-	local menuName = BackGround:FindFirstChild("MenuName")
-
-	if menuName and menuName:IsA("TextLabel") then
-		menuName.Text = tostring(nomeDoHub or "Frank Hub")
-	end
-
-	--==================================================
-	-- FECHAR
-	--==================================================
-
-	local closeButton = BackGround:FindFirstChild("Close")
-
-	if closeButton and closeButton:IsA("GuiButton") then
-		Conectar(self._connections, closeButton.MouseButton1Click, function()
-			if not self._destroyed then
-				self:Destroy()
-			end
-		end)
-	end
-
-	--==================================================
-	-- ARRASTAR
-	--==================================================
-
-	local BackGroundTop = BackGround:FindFirstChild("BackGroundTop")
-
-	if BackGroundTop and BackGroundTop:IsA("GuiObject") then
-		local arrastando = false
-		local inicioMouse = nil
-		local inicioPosicao = nil
-
-		Conectar(self._connections, BackGroundTop.InputBegan, function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				arrastando = true
-				inicioMouse = input.Position
-				inicioPosicao = BackGround.Position
-			end
-		end)
-
-		Conectar(self._connections, BackGroundTop.InputEnded, function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				arrastando = false
-			end
-		end)
-
-		Conectar(self._connections, UserInputService.InputChanged, function(input)
-			if self._destroyed or not arrastando then
-				return
-			end
-
-			if input.UserInputType ~= Enum.UserInputType.MouseMovement
-				and input.UserInputType ~= Enum.UserInputType.Touch then
-				return
-			end
-
-			if not inicioMouse or not inicioPosicao then
-				return
-			end
-
-			local delta = input.Position - inicioMouse
-
-			BackGround.Position = UDim2.new(
-				inicioPosicao.X.Scale,
-				inicioPosicao.X.Offset + delta.X,
-				inicioPosicao.Y.Scale,
-				inicioPosicao.Y.Offset + delta.Y
-			)
-		end)
-	end
-
-	--==================================================
-	-- BOTOES FIXOS
-	--==================================================
-
-	if FixedButtonsFrame then
-		local DiscordButton = FixedButtonsFrame:FindFirstChild("DiscordButton")
-		local ConfigButton = FixedButtonsFrame:FindFirstChild("ConfigButton")
-
-		if DiscordButton and DiscordButton:IsA("GuiButton") then
-			Conectar(self._connections, DiscordButton.MouseButton1Click, function()
-				ExecutarCallback(self.OnDiscord)
-			end)
-		end
-
-		if ConfigButton and ConfigButton:IsA("GuiButton") then
-			Conectar(self._connections, ConfigButton.MouseButton1Click, function()
-				if self.ConfigCallback then
-					ExecutarCallback(self.ConfigCallback)
-					return
-				end
-
-				if self.ConfigTab then
-					self:SelecionarAba(self.ConfigTab)
-				end
-			end)
-		end
-	end
-
+	self:Fire("Loaded", nomeDoHub)
 	return self
 end
 
---==================================================
--- SELECIONAR ABA
---==================================================
+function HubLibrary.Unload()
+	local hub = Global.FrankHubActive or HubLibrary._Active
+	if hub and not hub._destroyed then
+		hub:Destroy()
+	end
+	Global.FrankHubActive = nil
+	HubLibrary._Active = nil
+	return true
+end
 
-function HubLibrary:SelecionarAba(aba)
-	if self._destroyed or not aba then
+function HubLibrary:Destroy()
+	if self._destroyed then
 		return
 	end
+	self:Fire("Destroyed")
+	self._destroyed = true
 
-	for _, outraAba in ipairs(self.Abas) do
-		if outraAba.Scroll and outraAba.Scroll.Parent then
-			outraAba.Scroll.Visible = false
-		end
+	for _, connection in ipairs(self._conns) do
+		pcall(function()
+			connection:Disconnect()
+		end)
+	end
+	table.clear(self._conns)
 
-		if outraAba.Btn and outraAba.Btn.Parent then
-			outraAba.Btn.BackgroundColor3 = COR_TAB_NORMAL
-			outraAba.Btn.TextColor3 = COR_TAB_TEXTO_NORMAL
-		end
+	for _, tab in ipairs(self.Abas) do
+		tab._destroyed = true
 	end
 
-	if aba.Scroll and aba.Scroll.Parent then
-		aba.Scroll.Visible = true
+	if self.ScreenGui then
+		self.ScreenGui:Destroy()
 	end
 
-	if aba.Btn and aba.Btn.Parent then
-		aba.Btn.BackgroundColor3 = COR_TOPO
-		aba.Btn.TextColor3 = COR_TAB_TEXTO_ATIVA
+	if Global.FrankHubActive == self then
+		Global.FrankHubActive = nil
+	end
+	if HubLibrary._Active == self then
+		HubLibrary._Active = nil
 	end
 
-	self.AbaAtiva = aba
-
-	ExecutarCallback(aba._onSelected, aba)
+	self.Abas = {}
+	self.AbaAtiva = nil
+	self._registry = {}
+	self._registryById = {}
+	self._themed = {}
+	self._events = {}
+	self._stateListeners = {}
+	self.ScreenGui = nil
+	self.BackGround = nil
 end
 
 --==================================================
--- ADD TAB
+-- JANELA
 --==================================================
 
-function HubLibrary:AddTab(nomeDaAba)
+function HubLibrary:SetResponsive(enabled)
+	self._responsiveEnabled = enabled ~= false
+	local scale = self._uiScale
+	if not scale or not self.ScreenGui then
+		return 1
+	end
+	local factor = 1
+	if self._responsiveEnabled then
+		local view = self.ScreenGui.AbsoluteSize
+		if view.X > 0 and view.Y > 0 then
+			factor = math.clamp(math.min(view.X / (WIN_W + 60), view.Y / (WIN_H + 60)), 0.5, 1)
+		end
+	end
+	scale.Scale = factor
+	return factor
+end
+
+function HubLibrary:SetVisible(visible)
 	if self._destroyed then
-		return nil
+		return false
 	end
-
-	local templateButton = self.TabButtonsFrame:FindFirstChild("Aba1")
-
-	if not templateButton or not templateButton:IsA("TextButton") then
-		warn('[HubLibrary] "Aba1" nao encontrada.')
-		return nil
+	visible = visible ~= false
+	self.BackGround.Visible = visible
+	self._fab.Visible = not visible
+	if not visible and self._tooltip then
+		self._tooltip.Visible = false
 	end
-
-	-- "Aba1" e o template desenhado a mao.
-	templateButton.Visible = false
-
-	local TabButton = templateButton:Clone()
-	TabButton.Name = tostring(nomeDaAba) .. "Button"
-	TabButton.Text = tostring(nomeDaAba)
-	TabButton.Visible = true
-	TabButton.Parent = self.TabButtonsFrame
-
-	local ScrollingPage, PageLayout = CriarPagina(
-		self.TemplateScrollingFrame,
-		self.BackGround,
-		nomeDaAba
-	)
-
-	local abaSelf = {
-		ScrollingFrame = ScrollingPage,
-		Scroll = ScrollingPage,
-		Btn = TabButton,
-		_hub = self,
-		_destroyed = false,
-		Name = tostring(nomeDaAba),
-		Layout = PageLayout,
-	}
-
-	-- Se a aba tiver sido destruida, impede callbacks.
-	local clickConnection = TabButton.MouseButton1Click:Connect(function()
-		if not self._destroyed and not abaSelf._destroyed then
-			self:SelecionarAba(abaSelf)
-		end
-	end)
-
-	table.insert(self._connections, clickConnection)
-	table.insert(self.Abas, abaSelf)
-
-	-- Primeira aba fica ativa automaticamente.
-	if #self.Abas == 1 then
-		self:SelecionarAba(abaSelf)
-	end
-
-	return setmetatable(abaSelf, {
-		__index = HubLibrary
-	})
+	self:Fire("VisibilityChanged", visible)
+	return visible
 end
 
---==================================================
--- TOGGLE
---==================================================
-
-function HubLibrary:AddToggle(texto, callback, valorInicial)
-	if self._destroyed or not self.ScrollingFrame then
-		return nil
-	end
-
-	local hub = self._hub or self
-	local parentScroll = self.Scroll or self.ScrollingFrame
-
-	local template = EncontrarTemplate(hub.Templates, "ToggleTemplate")
-
-	if not template then
-		return nil
-	end
-
-	template.Visible = false
-
-	local ToggleTemplate = template:Clone()
-	ToggleTemplate.Visible = true
-	ToggleTemplate.Parent = parentScroll
-
-	local TitleLabel = EncontrarTitulo(ToggleTemplate)
-	local ToggleButton = EncontrarToggleButton(ToggleTemplate)
-
-	if TitleLabel and TitleLabel:IsA("TextLabel") then
-		TitleLabel.Text = tostring(texto)
-	end
-
-	if not ToggleButton then
-		warn("[HubLibrary] ToggleButton nao encontrado.")
-		ToggleTemplate:Destroy()
-		return nil
-	end
-
-	local ativo = valorInicial == true
-
-	local function AtualizarVisual()
-		local cor = ativo and COR_VERDE or COR_CONTROLE
-
-		ToggleButton.BackgroundColor3 = cor
-
-		local ButtonLine = ToggleButton:FindFirstChild("ButtonLine")
-
-		if ButtonLine and ButtonLine:IsA("GuiObject") then
-			ButtonLine.BackgroundColor3 = cor
-		end
-	end
-
-	local function Set(valor, dispararCallback)
-		ativo = valor == true
-		AtualizarVisual()
-
-		if dispararCallback ~= false then
-			ExecutarCallback(callback, ativo)
-		end
-	end
-
-	AtualizarVisual()
-
-	Conectar(hub._itemConnections, ToggleButton.MouseButton1Click, function()
-		if ToggleTemplate.Parent then
-			Set(not ativo, true)
-		end
-	end)
-
-	return {
-		Set = function(_, valor)
-			Set(valor, true)
-		end,
-
-		Get = function()
-			return ativo
-		end,
-
-		Object = ToggleTemplate,
-		Button = ToggleButton,
-	}
+function HubLibrary:Open()
+	return self:SetVisible(true)
 end
 
---==================================================
--- SLIDER
---==================================================
-
-function HubLibrary:AddSlider(
-	texto,
-	valorMin,
-	valorMax,
-	valorPadrao,
-	callback
-)
-	if self._destroyed or not self.ScrollingFrame then
-		return nil
-	end
-
-	local hub = self._hub or self
-	local parentScroll = self.Scroll or self.ScrollingFrame
-
-	valorMin = tonumber(valorMin) or 0
-	valorMax = tonumber(valorMax) or 100
-	valorPadrao = tonumber(valorPadrao) or valorMin
-
-	if valorMax < valorMin then
-		valorMin, valorMax = valorMax, valorMin
-	end
-
-	valorPadrao = math.clamp(
-		valorPadrao,
-		valorMin,
-		valorMax
-	)
-
-	local valorAtual = valorPadrao
-
-	local template = EncontrarTemplate(
-		hub.Templates,
-		"SliderTemplate"
-	)
-
-	if not template then
-		return nil
-	end
-
-	template.Visible = false
-
-	local SliderTemplate = template:Clone()
-	SliderTemplate.Visible = true
-	SliderTemplate.Parent = parentScroll
-
-	local TitleLabel = EncontrarTitulo(SliderTemplate)
-	local SliderTrack = SliderTemplate:FindFirstChild("SliderTrack")
-
-	if not SliderTrack then
-		warn("[HubLibrary] SliderTrack nao encontrado.")
-		SliderTemplate:Destroy()
-		return nil
-	end
-
-	local FillButton = SliderTrack:FindFirstChild("FillButton")
-	local Progress = SliderTrack:FindFirstChild("Progress")
-
-	if not FillButton
-		or not FillButton:IsA("TextButton")
-		or not Progress
-		or not Progress:IsA("GuiObject") then
-
-		warn("[HubLibrary] FillButton/Progress nao encontrado.")
-		SliderTemplate:Destroy()
-		return nil
-	end
-
-	if TitleLabel and TitleLabel:IsA("TextLabel") then
-		TitleLabel.Text =
-			tostring(texto) .. " (" .. tostring(valorAtual) .. ")"
-	end
-
-	local function AtualizarVisual()
-		local percentual = 0
-
-		if valorMax ~= valorMin then
-			percentual =
-				(valorAtual - valorMin)
-				/ (valorMax - valorMin)
-		end
-
-		percentual = math.clamp(percentual, 0, 1)
-
-		Progress.Size =
-			UDim2.new(percentual, 0, 1, 0)
-
-		FillButton.Position =
-			UDim2.new(percentual, 0, 0.5, 0)
-
-		if TitleLabel and TitleLabel:IsA("TextLabel") then
-			TitleLabel.Text =
-				tostring(texto) .. " (" .. tostring(valorAtual) .. ")"
-		end
-	end
-
-	local function DefinirPorX(posicaoX)
-		if not SliderTrack.Parent then
-			return
-		end
-
-		local largura = SliderTrack.AbsoluteSize.X
-
-		if largura <= 0 then
-			return
-		end
-
-		local percentual =
-			(posicaoX - SliderTrack.AbsolutePosition.X)
-			/ largura
-
-		percentual = math.clamp(percentual, 0, 1)
-
-		valorAtual = math.round(
-			valorMin
-			+ ((valorMax - valorMin) * percentual)
-		)
-
-		AtualizarVisual()
-		ExecutarCallback(callback, valorAtual)
-	end
-
-	local arrastando = false
-
-	Conectar(hub._itemConnections, SliderTrack.InputBegan, function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
-			arrastando = true
-			DefinirPorX(input.Position.X)
-		end
-	end)
-
-	Conectar(hub._itemConnections, FillButton.InputBegan, function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
-			arrastando = true
-			DefinirPorX(input.Position.X)
-		end
-	end)
-
-	Conectar(hub._itemConnections, UserInputService.InputEnded, function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
-			arrastando = false
-		end
-	end)
-
-	Conectar(hub._itemConnections, UserInputService.InputChanged, function(input)
-		if not arrastando then
-			return
-		end
-
-		if input.UserInputType ~= Enum.UserInputType.MouseMovement
-			and input.UserInputType ~= Enum.UserInputType.Touch then
-			return
-		end
-
-		DefinirPorX(input.Position.X)
-	end)
-
-	AtualizarVisual()
-
-	return {
-		Set = function(_, valor)
-			local numero = tonumber(valor)
-
-			if numero == nil then
-				return
-			end
-
-			valorAtual = math.clamp(
-				math.round(numero),
-				valorMin,
-				valorMax
-			)
-
-			AtualizarVisual()
-			ExecutarCallback(callback, valorAtual)
-		end,
-
-		Get = function()
-			return valorAtual
-		end,
-
-		Object = SliderTemplate,
-		Track = SliderTrack,
-		FillButton = FillButton,
-	}
+function HubLibrary:CloseMenu()
+	return self:SetVisible(false)
 end
 
---==================================================
--- DROPDOWN
---==================================================
-
-function HubLibrary:AddDropdown(
-	texto,
-	opcoes,
-	callback,
-	valorInicial
-)
-	if self._destroyed or not self.ScrollingFrame then
-		return nil
-	end
-
-	local hub = self._hub or self
-	local parentScroll = self.Scroll or self.ScrollingFrame
-
-	opcoes =
-		typeof(opcoes) == "table"
-		and opcoes
-		or {}
-
-	local valorAtual = valorInicial
-
-	if valorAtual == nil then
-		if #opcoes > 0 then
-			valorAtual = opcoes[1]
-		else
-			valorAtual = "Select Option..."
-		end
-	end
-
-	local template =
-		EncontrarTemplate(
-			hub.Templates,
-			"DropdownTemplate"
-		)
-
-	if not template then
-		return nil
-	end
-
-	template.Visible = false
-
-	local DropdownTemplate = template:Clone()
-	DropdownTemplate.Visible = true
-	DropdownTemplate.ClipsDescendants = false
-	DropdownTemplate.Parent = parentScroll
-
-	local TitleLabel = DropdownTemplate:FindFirstChild("TitleLabel")
-	local DropdownButton =
-		EncontrarDropdownButton(DropdownTemplate)
-
-	if TitleLabel and TitleLabel:IsA("TextLabel") then
-		TitleLabel.Text = tostring(texto)
-	end
-
-	if not DropdownButton then
-		warn("[HubLibrary] Botao do Dropdown nao encontrado.")
-		DropdownTemplate:Destroy()
-		return nil
-	end
-
-	local SelectedLabel =
-		EncontrarDropdownTexto(DropdownButton)
-
-	local ContainerOpcoes = Instance.new("Frame")
-	ContainerOpcoes.Name = "ContainerOpcoes"
-	ContainerOpcoes.Size = UDim2.new(
-		DropdownButton.Size.X.Scale,
-		DropdownButton.Size.X.Offset,
-		0,
-		math.max(#opcoes * 30, 1)
-	)
-
-	ContainerOpcoes.Position = UDim2.new(
-		DropdownButton.Position.X.Scale,
-		DropdownButton.Position.X.Offset,
-		0,
-		DropdownButton.Position.Y.Offset
-			+ DropdownButton.Size.Y.Offset
-			+ 5
-	)
-
-	ContainerOpcoes.BackgroundColor3 =
-		Color3.fromRGB(25, 25, 25)
-
-	ContainerOpcoes.BorderSizePixel = 0
-	ContainerOpcoes.Visible = false
-	ContainerOpcoes.ZIndex = 100
-	ContainerOpcoes.Parent = DropdownTemplate
-
-	AplicarBorda(ContainerOpcoes, 2)
-	Arredondar(ContainerOpcoes, 5)
-
-	local OptionLayout = Instance.new("UIListLayout")
-	OptionLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	OptionLayout.Parent = ContainerOpcoes
-
-	local aberto = false
-	local tamanhoOriginal = DropdownTemplate.Size
-
-	local function AtualizarTexto()
-		local textoSelecionado =
-			valorAtual == nil
-			and "Select Option..."
-			or tostring(valorAtual)
-
-		if SelectedLabel and SelectedLabel:IsA("TextLabel") then
-			SelectedLabel.Text = textoSelecionado
-		elseif DropdownButton:IsA("TextButton") then
-			DropdownButton.Text = textoSelecionado
-		end
-	end
-
-	local function Fechar()
-		aberto = false
-		ContainerOpcoes.Visible = false
-
-		TweenService:Create(
-			DropdownTemplate,
-			TweenInfo.new(0.18),
-			{
-				Size = tamanhoOriginal
-			}
-		):Play()
-	end
-
-	local function Abrir()
-		if #opcoes == 0 then
-			return
-		end
-
-		aberto = true
-		ContainerOpcoes.Visible = true
-
-		local alturaExtra =
-			(#opcoes * 30) + 10
-
-		TweenService:Create(
-			DropdownTemplate,
-			TweenInfo.new(0.18),
-			{
-				Size = UDim2.new(
-					tamanhoOriginal.X.Scale,
-					tamanhoOriginal.X.Offset,
-					0,
-					tamanhoOriginal.Y.Offset + alturaExtra
-				)
-			}
-		):Play()
-	end
-
-	Conectar(
-		hub._itemConnections,
-		DropdownButton.MouseButton1Click,
-		function()
-			if aberto then
-				Fechar()
-			else
-				Abrir()
-			end
-		end
-	)
-
-	for indice, opcao in ipairs(opcoes) do
-		local OptionButton = Instance.new("TextButton")
-		OptionButton.Name = "Option" .. tostring(indice)
-		OptionButton.Size = UDim2.new(1, 0, 0, 30)
-		OptionButton.BackgroundColor3 =
-			Color3.fromRGB(25, 25, 25)
-		OptionButton.BorderSizePixel = 0
-		OptionButton.Text = tostring(opcao)
-		OptionButton.TextColor3 =
-			Color3.fromRGB(255, 255, 255)
-		OptionButton.Font = Enum.Font.SourceSans
-		OptionButton.TextSize = 16
-		OptionButton.AutoButtonColor = false
-		OptionButton.ZIndex = 101
-		OptionButton.LayoutOrder = indice
-		OptionButton.Parent = ContainerOpcoes
-
-		Conectar(
-			hub._itemConnections,
-			OptionButton.MouseEnter,
-			function()
-				if OptionButton.Parent then
-					TweenService:Create(
-						OptionButton,
-						TweenInfo.new(0.1),
-						{
-							BackgroundColor3 =
-								Color3.fromRGB(45, 45, 45)
-						}
-					):Play()
-				end
-			end
-		)
-
-		Conectar(
-			hub._itemConnections,
-			OptionButton.MouseLeave,
-			function()
-				if OptionButton.Parent then
-					TweenService:Create(
-						OptionButton,
-						TweenInfo.new(0.1),
-						{
-							BackgroundColor3 =
-								Color3.fromRGB(25, 25, 25)
-						}
-					):Play()
-				end
-			end
-		)
-
-		Conectar(
-			hub._itemConnections,
-			OptionButton.MouseButton1Click,
-			function()
-				valorAtual = opcao
-				AtualizarTexto()
-				Fechar()
-				ExecutarCallback(callback, opcao)
-			end
-		)
-	end
-
-	AtualizarTexto()
-
-	return {
-		Set = function(_, valor)
-			valorAtual = valor
-			AtualizarTexto()
-
-			ExecutarCallback(
-				callback,
-				valorAtual
-			)
-		end,
-
-		Get = function()
-			return valorAtual
-		end,
-
-		Open = function()
-			Abrir()
-		end,
-
-		Close = function()
-			Fechar()
-		end,
-
-		Object = DropdownTemplate,
-		Button = DropdownButton,
-	}
+function HubLibrary:ToggleVisible()
+	return self:SetVisible(not self.BackGround.Visible)
 end
 
---==================================================
--- INFO CARD
---==================================================
-
-function HubLibrary:AddInfoCard(
-	tituloCard,
-	iconeId,
-	listaDeTextos
-)
-	if self._destroyed or not self.ScrollingFrame then
-		return nil
+function HubLibrary:Minimizar(force)
+	if self._destroyed then
+		return false
+	end
+	local minimize = force
+	if minimize == nil then
+		minimize = not self._minimized
+	end
+	minimize = minimize == true
+	if minimize == self._minimized then
+		return minimize
 	end
 
-	local hub = self._hub or self
-	local parentScroll = self.Scroll or self.ScrollingFrame
+	self._minimized = minimize
+	self._minToken = self._minToken + 1
+	local token = self._minToken
 
-	listaDeTextos =
-		typeof(listaDeTextos) == "table"
-		and listaDeTextos
-		or {}
-
-	local template =
-		EncontrarTemplate(
-			hub.Templates,
-			"InfoCardTemplate"
-		)
-
-	if not template then
-		return nil
-	end
-
-	template.Visible = false
-
-	local InfoCardTemplate = template:Clone()
-	InfoCardTemplate.Visible = true
-	InfoCardTemplate.Parent = parentScroll
-
-	local TitleLabel =
-		InfoCardTemplate:FindFirstChild("TitleLabel")
-
-	local Icon =
-		InfoCardTemplate:FindFirstChild("Icon")
-
-	local ListInformations =
-		InfoCardTemplate:FindFirstChild(
-			"ListInformations"
-		)
-
-	if TitleLabel and TitleLabel:IsA("TextLabel") then
-		TitleLabel.Text = tostring(tituloCard)
-	end
-
-	if Icon and Icon:IsA("ImageLabel") then
-		Icon.Image =
-			NormalizarImagem(iconeId)
-	end
-
-	if ListInformations
-		and ListInformations:IsA("GuiObject") then
-
-		local InformationTemplate =
-			ListInformations:FindFirstChild(
-				"InformationTextTemplate"
-			)
-
-		if InformationTemplate
-			and InformationTemplate:IsA("TextLabel") then
-
-			InformationTemplate.Visible = false
-
-			for _, child in ipairs(
-				ListInformations:GetChildren()
-			) do
-				if child:IsA("TextLabel")
-					and child ~= InformationTemplate then
-					child:Destroy()
-				end
-			end
-
-			for indice, texto in ipairs(listaDeTextos) do
-				local InformationText =
-					InformationTemplate:Clone()
-
-				InformationText.Name =
-					"InformationText" .. tostring(indice)
-
-				InformationText.Text =
-					tostring(texto)
-
-				InformationText.Visible = true
-				InformationText.LayoutOrder = indice
-				InformationText.Parent =
-					ListInformations
-			end
-		end
-	end
-
-	return {
-		Object = InfoCardTemplate
-	}
-end
-
---==================================================
--- BUTTON
--- Se existir ButtonTemplate na pasta Templates,
--- ele sera usado. Caso contrario, cria um fallback.
---==================================================
-
-function HubLibrary:AddButton(texto, callback)
-	if self._destroyed or not self.ScrollingFrame then
-		return nil
-	end
-
-	local hub = self._hub or self
-	local parentScroll = self.Scroll or self.ScrollingFrame
-
-	local template =
-		EncontrarTemplate(
-			hub.Templates,
-			"ButtonTemplate"
-		)
-
-	local ButtonTemplate
-
-	if template then
-		template.Visible = false
-
-		ButtonTemplate = template:Clone()
-		ButtonTemplate.Visible = true
-		ButtonTemplate.Parent = parentScroll
+	if minimize then
+		self._body.Visible = false
+		self:Tween(self.BackGround, { Size = UDim2.fromOffset(WIN_W, TOP_H + 4) }, 0.18)
 	else
-		ButtonTemplate = Instance.new("TextButton")
-		ButtonTemplate.Name = "ButtonTemplate"
-		ButtonTemplate.Size = UDim2.new(1, -10, 0, 45)
-		ButtonTemplate.BackgroundColor3 = COR_CARD
-		ButtonTemplate.BorderSizePixel = 0
-		ButtonTemplate.TextColor3 =
-			Color3.fromRGB(255, 255, 255)
-		ButtonTemplate.Font =
-			Enum.Font.SourceSansBold
-		ButtonTemplate.TextSize = 18
-		ButtonTemplate.AutoButtonColor = false
-		ButtonTemplate.Parent = parentScroll
-
-		AplicarBorda(ButtonTemplate)
-		Arredondar(ButtonTemplate, 6)
+		self:Tween(self.BackGround, { Size = UDim2.fromOffset(WIN_W, WIN_H) }, 0.18)
+		task.delay(self._animations and 0.12 or 0, function()
+			if not self._destroyed and not self._minimized and self._minToken == token then
+				self._body.Visible = true
+			end
+		end)
 	end
 
-	if ButtonTemplate:IsA("TextButton") then
-		ButtonTemplate.Text = tostring(texto)
-	end
-
-	Conectar(
-		hub._itemConnections,
-		ButtonTemplate.MouseEnter,
-		function()
-			if ButtonTemplate.Parent then
-				TweenService:Create(
-					ButtonTemplate,
-					TweenInfo.new(0.12),
-					{
-						BackgroundColor3 =
-							Color3.fromRGB(50, 50, 50)
-					}
-				):Play()
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		ButtonTemplate.MouseLeave,
-		function()
-			if ButtonTemplate.Parent then
-				TweenService:Create(
-					ButtonTemplate,
-					TweenInfo.new(0.12),
-					{
-						BackgroundColor3 =
-							template
-							and template.BackgroundColor3
-							or COR_CARD
-					}
-				):Play()
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		ButtonTemplate.MouseButton1Click,
-		function()
-			ExecutarCallback(callback)
-		end
-	)
-
-	return {
-		Object = ButtonTemplate,
-		Button = ButtonTemplate,
-	}
+	self._minButton.Text = minimize and "+" or "_"
+	self:Fire("MinimizedChanged", minimize)
+	return minimize
 end
 
---==================================================
--- CONFIGURACAO DOS BOTOES FIXOS
---==================================================
+function HubLibrary:ToggleMenu()
+	return self:Minimizar(not self._minimized)
+end
+
+function HubLibrary:SetMenuKeybind(key)
+	local normalized = NormalizeKey(key)
+	if not normalized then
+		return false
+	end
+	self._menuKey = normalized
+	return true
+end
 
 function HubLibrary:SetDiscordCallback(callback)
 	self.OnDiscord = callback
+end
+
+function HubLibrary:SetDiscordLink(url)
+	self.OnDiscord = function()
+		if type(setclipboard) == "function" then
+			setclipboard(tostring(url))
+			self:Notify("Discord", "Link copiado para a area de transferencia.", 2.5, "Success")
+		else
+			self:Notify("Discord", tostring(url), 6, "Info")
+		end
+	end
 end
 
 function HubLibrary:SetConfigCallback(callback)
@@ -1379,48 +1302,1639 @@ function HubLibrary:SetConfigTab(aba)
 end
 
 --==================================================
--- DESTRUIR
+-- BUSCA
 --==================================================
 
-function HubLibrary:Destroy()
+function HubLibrary:_ApplySearch()
 	if self._destroyed then
 		return
 	end
+	local query = string.lower(tostring(self._searchQuery or ""))
+	query = query:match("^%s*(.-)%s*$") or ""
 
+	for _, entry in ipairs(self._registry) do
+		local object = entry.Object
+		if object and object.Parent then
+			local matched = true
+			if query ~= "" then
+				if entry.Kind == "Section" or entry.Kind == "Spacer" then
+					matched = false
+				else
+					local haystack = string.lower((entry.Title or "") .. " " .. (entry.Description or ""))
+					matched = string.find(haystack, query, 1, true) ~= nil
+				end
+			end
+			entry.Visible = matched
+			object.Visible = matched and not entry.ForceHidden
+		end
+	end
+end
+
+function HubLibrary:SetSearchEnabled(enabled)
+	enabled = enabled ~= false
+	self._searchEnabled = enabled
+	self._searchFrame.Visible = enabled
+	if not enabled then
+		self._searchInput.Text = ""
+	end
+	local offset = enabled and (SEARCH_H + 8) or 0
+	self._pages.Position = UDim2.fromOffset(0, offset)
+	self._pages.Size = UDim2.new(1, 0, 1, -offset)
+	return enabled
+end
+
+function HubLibrary:Search(query)
+	self._searchInput.Text = tostring(query or "")
+	return self._searchQuery
+end
+
+function HubLibrary:ClearSearch()
+	return self:Search("")
+end
+
+function HubLibrary:Refresh()
+	self:_ApplySearch()
+	self:Fire("Refresh")
+	return true
+end
+
+--==================================================
+-- ABAS
+--==================================================
+
+function HubLibrary:SelecionarAba(aba)
+	if self._destroyed then
+		return
+	end
+	if type(aba) == "string" then
+		for _, candidate in ipairs(self.Abas) do
+			if candidate.Name == aba then
+				aba = candidate
+				break
+			end
+		end
+	end
+	if type(aba) ~= "table" or aba._destroyed then
+		return
+	end
+
+	local previous = self.AbaAtiva
+	for _, other in ipairs(self.Abas) do
+		local active = other == aba
+		other.Scroll.Visible = active
+		other:_StyleButton(active)
+	end
+	self.AbaAtiva = aba
+
+	if self._tooltip then
+		self._tooltip.Visible = false
+	end
+
+	if previous ~= aba and self._animations then
+		aba.Scroll.Position = UDim2.fromOffset(16, 0)
+		self:Tween(aba.Scroll, { Position = UDim2.fromOffset(0, 0) }, 0.18, Enum.EasingStyle.Quint)
+	end
+
+	self:Fire("TabChanged", aba, previous)
+end
+
+function HubLibrary:AddTab(nomeDaAba)
+	if self._destroyed then
+		return nil
+	end
+	nomeDaAba = tostring(nomeDaAba or "Tab")
+
+	local button = New("TextButton", {
+		Name = nomeDaAba .. "Button",
+		LayoutOrder = #self.Abas + 1,
+		Size = UDim2.new(1, 0, 0, 38),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = nomeDaAba,
+		TextSize = 20,
+		FontFace = FONT_BOLD,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, self._tabList)
+	Corner(button, 5)
+	local buttonStroke = Stroke(button, 2)
+
+	local page = New("ScrollingFrame", {
+		Name = nomeDaAba .. "Scroll",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 4,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Visible = false,
+	}, self._pages)
+	New("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	}, page)
+	New("UIPadding", {
+		PaddingTop = UDim.new(0, 2),
+		PaddingRight = UDim.new(0, 8),
+		PaddingBottom = UDim.new(0, 8),
+	}, page)
+	self:_T(page, "ScrollBarImageColor3", "Accent")
+
+	local tab = setmetatable({
+		Name = nomeDaAba,
+		Scroll = page,
+		ScrollingFrame = page,
+		Btn = button,
+		Items = {},
+		_hub = self,
+		_order = 0,
+		_active = false,
+		_destroyed = false,
+	}, Tab)
+
+	self:_Themed(button, function(t)
+		button.BackgroundColor3 = tab._active and t.AccentHover or t.Accent
+		button.TextColor3 = t.Text
+		buttonStroke.Color = tab._active and t.Text or t.Border
+	end)
+	tab._paintButton = function()
+		button.BackgroundColor3 = tab._active and self._theme.AccentHover or self._theme.Accent
+		buttonStroke.Color = tab._active and self._theme.Text or self._theme.Border
+	end
+
+	self:_Conn(button.MouseEnter, function()
+		if not tab._active then
+			button.BackgroundColor3 = self._theme.AccentHover
+		end
+	end)
+	self:_Conn(button.MouseLeave, function()
+		tab._paintButton()
+	end)
+	self:_Conn(button.MouseButton1Click, function()
+		if not self._destroyed and not tab._destroyed then
+			self:SelecionarAba(tab)
+		end
+	end)
+
+	table.insert(self.Abas, tab)
+	if #self.Abas == 1 then
+		self:SelecionarAba(tab)
+	end
+	return tab
+end
+
+function Tab:_StyleButton(active)
+	self._active = active
+	self._paintButton()
+end
+
+function Tab:Destroy()
+	if self._destroyed then
+		return
+	end
+	local hub = self._hub
 	self._destroyed = true
 
-	DesconectarLista(self._connections)
-	DesconectarLista(self._itemConnections)
+	for _, entry in ipairs(table.clone(hub._registry)) do
+		if entry.Tab == self then
+			hub:_Unregister(entry)
+		end
+	end
 
-	if self.Abas then
-		for _, aba in ipairs(self.Abas) do
-			if aba then
-				aba._destroyed = true
+	local index = table.find(hub.Abas, self)
+	if index then
+		table.remove(hub.Abas, index)
+	end
+	self.Scroll:Destroy()
+	self.Btn:Destroy()
 
-				if aba.Scroll
-					and aba.Scroll.Parent then
-					aba.Scroll:Destroy()
+	if hub.AbaAtiva == self then
+		hub.AbaAtiva = nil
+		if hub.Abas[1] then
+			hub:SelecionarAba(hub.Abas[1])
+		end
+	end
+end
+
+--==================================================
+-- REGISTRO DE ITENS
+--==================================================
+
+function HubLibrary:_MakeId(tabName, title, custom)
+	local base
+	if custom then
+		base = tostring(custom)
+	else
+		base = Slug(tabName) .. "_" .. Slug(title)
+	end
+	local id = base
+	local counter = 1
+	while self._registryById[id] do
+		counter = counter + 1
+		id = base .. "_" .. tostring(counter)
+	end
+	return id
+end
+
+function HubLibrary:_Unregister(entry)
+	local index = table.find(self._registry, entry)
+	if index then
+		table.remove(self._registry, index)
+	end
+	self._registryById[entry.Id] = nil
+end
+
+function Tab:_NewCard(height, name)
+	local hub = self._hub
+	self._order = self._order + 1
+	local card = New("Frame", {
+		Name = name or "Item",
+		Size = UDim2.new(1, 0, 0, height),
+		BorderSizePixel = 0,
+		LayoutOrder = self._order,
+	}, self.Scroll)
+	Corner(card, 5)
+	local stroke = Stroke(card, 2)
+	hub:_Themed(card, function(t)
+		card.BackgroundColor3 = t.Card
+		card.BackgroundTransparency = t.CardTransparency
+		stroke.Color = t.Border
+	end)
+	return card
+end
+
+function Tab:_Title(card, text, widthOffset, height)
+	local label = New("TextLabel", {
+		Name = "TitleLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 0),
+		Size = height and UDim2.new(1, widthOffset or -24, 0, height) or UDim2.new(1, widthOffset or -24, 1, 0),
+		Text = tostring(text),
+		TextSize = 17,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextWrapped = true,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	self._hub:_T(label, "TextColor3", "Text")
+	return label
+end
+
+function Tab:_Register(control, kind, title, opts)
+	opts = opts or {}
+	local hub = self._hub
+
+	local entry = {
+		Id = hub:_MakeId(self.Name, title, opts.Id),
+		Kind = kind,
+		Control = control,
+		Object = control.Object,
+		Title = tostring(title or ""),
+		Description = opts.Description,
+		Tab = self,
+		Visible = true,
+		ForceHidden = false,
+		Persist = opts.Persist ~= false and self.Persist ~= false,
+		Default = DeepCopy(opts.Default),
+		CreatedAt = os.clock(),
+	}
+
+	control.Id = entry.Id
+	control.Kind = kind
+	control.Title = entry.Title
+	control.Description = entry.Description
+	control._entry = entry
+
+	table.insert(hub._registry, entry)
+	hub._registryById[entry.Id] = entry
+	table.insert(self.Items, control)
+
+	control.Destroy = function()
+		hub:_Unregister(entry)
+		if control.Object then
+			control.Object:Destroy()
+		end
+	end
+
+	if opts.Description and control.Object then
+		hub:AddTooltip(control.Object, opts.Description)
+	end
+
+	local stateKey = opts.StateKey and tostring(opts.StateKey) or nil
+	if stateKey and control.Get and control.Set then
+		control.StateKey = stateKey
+		if hub._state[stateKey] ~= nil then
+			control:Set(hub._state[stateKey], true)
+		else
+			hub._state[stateKey] = control:Get()
+		end
+		hub:BindState(stateKey, function(value)
+			control:Set(value, true)
+		end)
+	end
+
+	if hub._searchQuery ~= "" then
+		hub:_ApplySearch()
+	end
+	return control
+end
+
+function Tab:_Changed(control, callback, value)
+	local hub = self._hub
+	if control.StateKey then
+		hub:SetState(control.StateKey, value)
+	end
+	Call(callback, value)
+	hub:Fire("ControlChanged", control, value)
+	hub:_AutoSaveTick()
+end
+
+--==================================================
+-- TOGGLE
+--==================================================
+
+function Tab:AddToggle(texto, callback, valorInicial, descricao, stateKey)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	local card = self:_NewCard(46, "Toggle")
+
+	local hit = New("TextButton", {
+		Name = "ToggleButton",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+	}, card)
+
+	self:_Title(card, texto, -84)
+
+	local track = New("Frame", {
+		Name = "Track",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(52, 26),
+		BorderSizePixel = 0,
+	}, card)
+	Corner(track, 13)
+	local trackStroke = Stroke(track, 2)
+
+	local knob = New("Frame", {
+		Name = "ButtonLine",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = UDim2.fromOffset(20, 20),
+		BorderSizePixel = 0,
+	}, track)
+	Corner(knob, 10)
+
+	local active = valorInicial == true
+	local control = { Object = card, Button = hit }
+
+	local function paint(animate)
+		local t = hub._theme
+		local trackColor = active and t.Success or t.Control
+		local knobColor = active and t.Text or t.MutedText
+		local knobPos = active and UDim2.new(1, -23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
+		trackStroke.Color = t.Border
+		if animate then
+			hub:Tween(track, { BackgroundColor3 = trackColor }, 0.12)
+			hub:Tween(knob, { BackgroundColor3 = knobColor, Position = knobPos }, 0.12)
+		else
+			track.BackgroundColor3 = trackColor
+			knob.BackgroundColor3 = knobColor
+			knob.Position = knobPos
+		end
+	end
+	hub:_Themed(track, function()
+		paint(false)
+	end)
+
+	local function apply(value, silent)
+		value = value == true
+		if value == active then
+			return
+		end
+		active = value
+		paint(true)
+		if not silent then
+			self:_Changed(control, callback, active)
+		end
+	end
+
+	control.Set = function(_, value, silent)
+		apply(value, silent)
+	end
+	control.Get = function()
+		return active
+	end
+	control.Toggle = function()
+		apply(not active)
+	end
+
+	hub:_Conn(hit.MouseButton1Click, function()
+		apply(not active)
+	end)
+
+	return self:_Register(control, "Toggle", texto, {
+		Description = descricao,
+		Default = active,
+		StateKey = stateKey,
+	})
+end
+
+--==================================================
+-- SLIDER
+--==================================================
+
+function Tab:AddSlider(texto, valorMin, valorMax, valorPadrao, callback, descricao, stateKey, passo)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+
+	local min = tonumber(valorMin) or 0
+	local max = tonumber(valorMax) or 100
+	if max < min then
+		min, max = max, min
+	end
+	local step = tonumber(passo) or 1
+	if step <= 0 then
+		step = 1
+	end
+
+	local function needsDecimal(n)
+		return math.abs(n - math.floor(n + 0.5)) > 1e-9
+	end
+	local decimals = 0
+	while decimals < 6 and (needsDecimal(step * 10 ^ decimals) or needsDecimal(min * 10 ^ decimals)) do
+		decimals = decimals + 1
+	end
+
+	local function normalize(v)
+		v = math.clamp(tonumber(v) or min, min, max)
+		v = min + math.floor((v - min) / step + 0.5) * step
+		v = math.clamp(v, min, max)
+		local m = 10 ^ decimals
+		return math.floor(v * m + 0.5) / m
+	end
+
+	local value = normalize(valorPadrao or min)
+
+	local card = self:_NewCard(60, "Slider")
+
+	local title = New("TextLabel", {
+		Name = "TitleLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 6),
+		Size = UDim2.new(1, -90, 0, 22),
+		Text = tostring(texto),
+		TextSize = 17,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	hub:_T(title, "TextColor3", "Text")
+
+	local valueLabel = New("TextLabel", {
+		Name = "ValueLabel",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, -12, 0, 6),
+		Size = UDim2.fromOffset(70, 22),
+		Text = "",
+		TextSize = 17,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, card)
+	hub:_T(valueLabel, "TextColor3", "Accent")
+
+	local track = New("Frame", {
+		Name = "SliderTrack",
+		Position = UDim2.fromOffset(12, 40),
+		Size = UDim2.new(1, -24, 0, 8),
+		BorderSizePixel = 0,
+	}, card)
+	Corner(track, 4)
+	local trackStroke = Stroke(track, 1.5)
+
+	local fill = New("Frame", {
+		Name = "Progress",
+		Size = UDim2.new(0, 0, 1, 0),
+		BorderSizePixel = 0,
+	}, track)
+	Corner(fill, 4)
+
+	local knob = New("Frame", {
+		Name = "FillButton",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(16, 16),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		BorderSizePixel = 0,
+		ZIndex = 2,
+	}, track)
+	Corner(knob, 8)
+
+	hub:_Themed(track, function(t)
+		track.BackgroundColor3 = t.Control
+		trackStroke.Color = t.Border
+		fill.BackgroundColor3 = t.Success
+		knob.BackgroundColor3 = t.Text
+	end)
+
+	local hit = New("TextButton", {
+		Name = "Hit",
+		Position = UDim2.fromOffset(0, 26),
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+	}, card)
+
+	local control = { Object = card, Track = track, FillButton = knob }
+
+	local function render()
+		local pct = 0
+		if max ~= min then
+			pct = (value - min) / (max - min)
+		end
+		fill.Size = UDim2.new(pct, 0, 1, 0)
+		knob.Position = UDim2.new(pct, 0, 0.5, 0)
+		valueLabel.Text = tostring(value)
+	end
+
+	local function apply(v, silent)
+		v = normalize(v)
+		if v == value then
+			return
+		end
+		value = v
+		render()
+		if not silent then
+			self:_Changed(control, callback, value)
+		end
+	end
+
+	control.Set = function(_, v, silent)
+		apply(v, silent)
+	end
+	control.Get = function()
+		return value
+	end
+
+	local function fromX(x)
+		local width = track.AbsoluteSize.X
+		if width <= 0 then
+			return
+		end
+		local pct = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
+		apply(min + (max - min) * pct)
+	end
+
+	hub:_Conn(hit.InputBegan, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		local isTouch = input.UserInputType == Enum.UserInputType.Touch
+		local page = self.Scroll
+		page.ScrollingEnabled = false
+		fromX(input.Position.X)
+
+		local moveConn, endConn
+		local function stop()
+			if moveConn then
+				moveConn:Disconnect()
+			end
+			if endConn then
+				endConn:Disconnect()
+			end
+			if page.Parent then
+				page.ScrollingEnabled = true
+			end
+		end
+
+		moveConn = UserInputService.InputChanged:Connect(function(changed)
+			local isMove
+			if isTouch then
+				isMove = changed == input
+			else
+				isMove = changed.UserInputType == Enum.UserInputType.MouseMovement
+			end
+			if isMove then
+				fromX(changed.Position.X)
+			end
+		end)
+
+		endConn = UserInputService.InputEnded:Connect(function(ended)
+			if ended == input or (not isTouch and ended.UserInputType == Enum.UserInputType.MouseButton1) then
+				stop()
+			end
+		end)
+	end)
+
+	render()
+
+	return self:_Register(control, "Slider", texto, {
+		Description = descricao,
+		Default = value,
+		StateKey = stateKey,
+	})
+end
+
+--==================================================
+-- DROPDOWN
+--==================================================
+
+function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, stateKey)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+
+	local CARD_H, ROW_H, MAX_ROWS = 46, 28, 5
+
+	local options = {}
+	if type(opcoes) == "table" then
+		for _, option in ipairs(opcoes) do
+			table.insert(options, option)
+		end
+	end
+
+	local current = valorInicial
+	if current == nil then
+		current = options[1]
+	end
+
+	local card = self:_NewCard(CARD_H, "Dropdown")
+	card.ClipsDescendants = true
+	self:_Title(card, texto, -176, CARD_H)
+
+	local button = New("TextButton", {
+		Name = "Frame",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 8),
+		Size = UDim2.fromOffset(150, 30),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = "",
+	}, card)
+	Corner(button, 4)
+	local buttonStroke = Stroke(button, 2)
+
+	local selectedLabel = New("TextLabel", {
+		Name = "TitleLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(1, -30, 1, 0),
+		Text = "",
+		TextSize = 16,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, button)
+
+	local arrow = New("TextLabel", {
+		Name = "TextLabel",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -6, 0.5, 0),
+		Size = UDim2.fromOffset(18, 18),
+		BackgroundTransparency = 1,
+		Text = "v",
+		TextSize = 16,
+		FontFace = FONT_BOLD,
+	}, button)
+
+	local list = New("ScrollingFrame", {
+		Name = "ContainerOpcoes",
+		Position = UDim2.fromOffset(12, CARD_H),
+		Size = UDim2.new(1, -24, 0, 0),
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Visible = false,
+	}, card)
+	Corner(list, 4)
+	New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+	local optionButtons = {}
+	local optionConns = {}
+	local opened = false
+	local control = { Object = card, Button = button }
+
+	local function paintOptions()
+		local t = hub._theme
+		for _, item in ipairs(optionButtons) do
+			item.Button.BackgroundColor3 = (item.Value == current) and t.Accent or t.Control
+			item.Button.TextColor3 = t.Text
+		end
+	end
+
+	hub:_Themed(button, function(t)
+		button.BackgroundColor3 = t.Control
+		buttonStroke.Color = t.Border
+		selectedLabel.TextColor3 = t.Text
+		arrow.TextColor3 = t.Accent
+		list.BackgroundColor3 = t.Control
+		list.ScrollBarImageColor3 = t.Accent
+		paintOptions()
+	end)
+
+	local function updateText()
+		selectedLabel.Text = current ~= nil and tostring(current) or "Select..."
+	end
+
+	local function resize()
+		local listHeight = math.min(#options, MAX_ROWS) * ROW_H
+		list.Size = UDim2.new(1, -24, 0, listHeight)
+		list.Visible = opened and #options > 0
+		arrow.Text = opened and "^" or "v"
+		local target = opened and (CARD_H + listHeight + 10) or CARD_H
+		hub:Tween(card, { Size = UDim2.new(1, 0, 0, target) }, 0.16)
+	end
+
+	local function setCurrent(value, silent)
+		if value == current then
+			return
+		end
+		current = value
+		updateText()
+		paintOptions()
+		if not silent then
+			self:_Changed(control, callback, current)
+		end
+	end
+
+	local function buildOptions()
+		for _, connection in ipairs(optionConns) do
+			connection:Disconnect()
+		end
+		table.clear(optionConns)
+		for _, item in ipairs(optionButtons) do
+			item.Button:Destroy()
+		end
+		table.clear(optionButtons)
+
+		for index, option in ipairs(options) do
+			local optionButton = New("TextButton", {
+				Name = "Option" .. tostring(index),
+				LayoutOrder = index,
+				Size = UDim2.new(1, 0, 0, ROW_H),
+				BorderSizePixel = 0,
+				AutoButtonColor = false,
+				Text = tostring(option),
+				TextSize = 16,
+				FontFace = FONT_REG,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			}, list)
+			New("UIPadding", { PaddingLeft = UDim.new(0, 8) }, optionButton)
+			table.insert(optionButtons, { Button = optionButton, Value = option })
+
+			table.insert(optionConns, optionButton.MouseEnter:Connect(function()
+				optionButton.BackgroundColor3 = hub._theme.ControlHover
+			end))
+			table.insert(optionConns, optionButton.MouseLeave:Connect(function()
+				paintOptions()
+			end))
+			table.insert(optionConns, optionButton.MouseButton1Click:Connect(function()
+				setCurrent(option)
+				opened = false
+				resize()
+			end))
+		end
+
+		paintOptions()
+		resize()
+	end
+
+	-- Estas conexoes vivem dentro do dropdown; garantimos a limpeza ao destruir o hub.
+	hub:_Conn(card.Destroying, function()
+		for _, connection in ipairs(optionConns) do
+			connection:Disconnect()
+		end
+		table.clear(optionConns)
+	end)
+
+	hub:_Conn(button.MouseButton1Click, function()
+		if #options == 0 then
+			return
+		end
+		opened = not opened
+		resize()
+	end)
+
+	control.Set = function(_, value, silent)
+		setCurrent(value, silent)
+	end
+	control.Get = function()
+		return current
+	end
+	control.Open = function()
+		if #options > 0 then
+			opened = true
+			resize()
+		end
+	end
+	control.Close = function()
+		opened = false
+		resize()
+	end
+	control.SetOptions = function(_, newOptions)
+		options = {}
+		if type(newOptions) == "table" then
+			for _, option in ipairs(newOptions) do
+				table.insert(options, option)
+			end
+		end
+		if current ~= nil and not table.find(options, current) then
+			current = options[1]
+		end
+		updateText()
+		if #options == 0 then
+			opened = false
+		end
+		buildOptions()
+	end
+	control.GetOptions = function()
+		return table.clone(options)
+	end
+
+	updateText()
+	buildOptions()
+
+	return self:_Register(control, "Dropdown", texto, {
+		Description = descricao,
+		Default = current,
+		StateKey = stateKey,
+	})
+end
+
+--==================================================
+-- INFO CARD
+--==================================================
+
+function Tab:AddInfoCard(tituloCard, iconeId, listaDeTextos, descricao)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+
+	local lines = {}
+	if type(listaDeTextos) == "table" then
+		for _, text in ipairs(listaDeTextos) do
+			table.insert(lines, tostring(text))
+		end
+	end
+
+	local card = self:_NewCard(110, "InfoCard")
+
+	local icon = New("ImageLabel", {
+		Name = "Icon",
+		Position = UDim2.fromOffset(12, 12),
+		Size = UDim2.fromOffset(86, 86),
+		BorderSizePixel = 0,
+		Image = ToImage(iconeId),
+		ScaleType = Enum.ScaleType.Crop,
+	}, card)
+	Corner(icon, 5)
+	local iconStroke = Stroke(icon, 2)
+	hub:_Themed(icon, function(t)
+		icon.BackgroundColor3 = t.Control
+		iconStroke.Color = t.Accent
+	end)
+
+	local title = New("TextLabel", {
+		Name = "TitleLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(110, 8),
+		Size = UDim2.new(1, -122, 0, 28),
+		Text = tostring(tituloCard or ""),
+		TextSize = 21,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	hub:_T(title, "TextColor3", "Text")
+
+	local listFrame = New("Frame", {
+		Name = "ListInformations",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(110, 40),
+		Size = UDim2.new(1, -122, 1, -48),
+	}, card)
+	New("UIListLayout", {
+		Padding = UDim.new(0, 2),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, listFrame)
+
+	local control = { Object = card }
+
+	local function setLines(newLines)
+		for _, child in ipairs(listFrame:GetChildren()) do
+			if child:IsA("TextLabel") then
+				child:Destroy()
+			end
+		end
+		lines = {}
+		for index, text in ipairs(newLines or {}) do
+			text = tostring(text)
+			table.insert(lines, text)
+			local label = New("TextLabel", {
+				Name = "InformationText" .. tostring(index),
+				LayoutOrder = index,
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 22),
+				Text = text,
+				TextSize = 17,
+				FontFace = FONT_BOLD,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			}, listFrame)
+			hub:_T(label, "TextColor3", "Text")
+		end
+		card.Size = UDim2.new(1, 0, 0, math.max(110, 48 + #lines * 24 + 8))
+	end
+
+	setLines(lines)
+
+	control.SetTitle = function(_, text)
+		title.Text = tostring(text)
+		if control._entry then
+			control._entry.Title = tostring(text)
+		end
+	end
+	control.SetIcon = function(_, id)
+		icon.Image = ToImage(id)
+	end
+	control.SetLines = function(_, newLines)
+		setLines(newLines)
+	end
+	control.SetTexts = control.SetLines
+	control.GetLines = function()
+		return table.clone(lines)
+	end
+
+	return self:_Register(control, "InfoCard", tituloCard, { Description = descricao })
+end
+
+--==================================================
+-- BOTAO
+--==================================================
+
+function Tab:AddButton(texto, callback, descricao)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+
+	self._order = self._order + 1
+	local button = New("TextButton", {
+		Name = "ButtonTemplate",
+		LayoutOrder = self._order,
+		Size = UDim2.new(1, 0, 0, 40),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = tostring(texto),
+		TextSize = 18,
+		FontFace = FONT_BOLD,
+	}, self.Scroll)
+	Corner(button, 5)
+	local stroke = Stroke(button, 2)
+	hub:_Themed(button, function(t)
+		button.BackgroundColor3 = t.Control
+		button.TextColor3 = t.Text
+		stroke.Color = t.Border
+	end)
+	hub:_Hover(button, "Control", "ControlHover")
+
+	local control = { Object = button, Button = button }
+	control.SetText = function(_, text)
+		button.Text = tostring(text)
+		if control._entry then
+			control._entry.Title = tostring(text)
+		end
+	end
+
+	hub:_Conn(button.MouseButton1Click, function()
+		Call(callback)
+		hub:Fire("ButtonPressed", control)
+	end)
+
+	return self:_Register(control, "Button", texto, { Description = descricao })
+end
+
+--==================================================
+-- KEYBIND
+--==================================================
+
+-- callback: chamado quando a tecla e PRESSIONADA.
+-- onChanged: chamado quando o usuario troca a tecla.
+function Tab:AddKeybind(texto, teclaInicial, callback, descricao, onChanged)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	local card = self:_NewCard(46, "Keybind")
+	self:_Title(card, texto, -140)
+
+	local keyButton = New("TextButton", {
+		Name = "Key",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(116, 30),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = "",
+		TextSize = 15,
+		FontFace = FONT_BOLD,
+	}, card)
+	Corner(keyButton, 4)
+	local keyStroke = Stroke(keyButton, 2)
+	hub:_Themed(keyButton, function(t)
+		keyButton.BackgroundColor3 = t.Control
+		keyButton.TextColor3 = t.Text
+		keyStroke.Color = t.Border
+	end)
+
+	local key = NormalizeKey(teclaInicial) or Enum.KeyCode.RightShift
+	local listening = false
+	local control = { Object = card, Button = keyButton }
+
+	local function update()
+		keyButton.Text = listening and "PRESSIONE..." or key.Name
+	end
+
+	local function setKey(newKey, silent)
+		local normalized = NormalizeKey(newKey)
+		if not normalized or normalized == key then
+			return
+		end
+		key = normalized
+		update()
+		if not silent then
+			Call(onChanged, key)
+			hub:Fire("KeybindChanged", tostring(texto), key)
+			hub:_AutoSaveTick()
+		end
+	end
+
+	update()
+
+	hub:_Conn(keyButton.MouseButton1Click, function()
+		listening = true
+		hub._capturingKey = true
+		update()
+	end)
+
+	hub:_Conn(UserInputService.InputBegan, function(input, processed)
+		if hub._destroyed or input.UserInputType ~= Enum.UserInputType.Keyboard then
+			return
+		end
+		if listening then
+			listening = false
+			hub._capturingKey = false
+			if input.KeyCode ~= Enum.KeyCode.Escape and input.KeyCode ~= Enum.KeyCode.Unknown then
+				setKey(input.KeyCode)
+			end
+			update()
+			return
+		end
+		if processed then
+			return
+		end
+		if input.KeyCode == key then
+			Call(callback, key)
+			hub:Fire("KeybindPressed", tostring(texto), key)
+		end
+	end)
+
+	control.Get = function()
+		return key
+	end
+	control.Set = function(_, newKey, silent)
+		setKey(newKey, silent)
+		return key
+	end
+	-- Enum nao e serializavel em JSON: salvamos o nome da tecla.
+	control._serialize = function()
+		return key.Name
+	end
+	control._deserialize = function(value, silent)
+		setKey(value, silent)
+	end
+
+	return self:_Register(control, "Keybind", texto, {
+		Description = descricao,
+		Default = key.Name,
+	})
+end
+
+--==================================================
+-- SECAO / LABEL / ESPACADOR / CUSTOM
+--==================================================
+
+function Tab:AddSection(title, subtitle)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	self._order = self._order + 1
+
+	local frame = New("Frame", {
+		Name = "Section",
+		LayoutOrder = self._order,
+		Size = UDim2.new(1, 0, 0, subtitle and 50 or 32),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+	}, self.Scroll)
+
+	local label = New("TextLabel", {
+		Name = "Title",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(2, 1),
+		Size = UDim2.new(1, -4, 0, 24),
+		Text = tostring(title or "Section"),
+		TextSize = 18,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, frame)
+	hub:_T(label, "TextColor3", "Text")
+
+	if subtitle then
+		local sub = New("TextLabel", {
+			Name = "Subtitle",
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(2, 23),
+			Size = UDim2.new(1, -4, 0, 18),
+			Text = tostring(subtitle),
+			TextSize = 13,
+			FontFace = FONT_REG,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, frame)
+		hub:_T(sub, "TextColor3", "MutedText")
+	end
+
+	local line = New("Frame", {
+		Name = "Line",
+		Position = UDim2.new(0, 0, 1, -3),
+		Size = UDim2.new(1, 0, 0, 2),
+		BorderSizePixel = 0,
+	}, frame)
+	hub:_T(line, "BackgroundColor3", "Accent")
+
+	return self:_Register({ Object = frame, Label = label, Line = line }, "Section", title, { Persist = false })
+end
+
+function Tab:AddLabel(text, description)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	local card = self:_NewCard(description and 48 or 32, "Label")
+
+	local title = New("TextLabel", {
+		Name = "TitleLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, description and 4 or 0),
+		Size = UDim2.new(1, -24, 0, description and 22 or 32),
+		Text = tostring(text or ""),
+		TextSize = 16,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	hub:_T(title, "TextColor3", "Text")
+
+	local desc
+	if description then
+		desc = New("TextLabel", {
+			Name = "Description",
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(12, 25),
+			Size = UDim2.new(1, -24, 0, 18),
+			Text = tostring(description),
+			TextSize = 13,
+			FontFace = FONT_REG,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		}, card)
+		hub:_T(desc, "TextColor3", "MutedText")
+	end
+
+	local control = { Object = card, Label = title }
+	control.SetText = function(_, newText)
+		title.Text = tostring(newText)
+		if control._entry then
+			control._entry.Title = tostring(newText)
+		end
+	end
+	control.SetDescription = function(_, newText)
+		if desc then
+			desc.Text = tostring(newText)
+		end
+	end
+
+	return self:_Register(control, "Label", text, { Persist = false })
+end
+
+function Tab:AddSpacer(height)
+	if self._destroyed then
+		return nil
+	end
+	self._order = self._order + 1
+	local spacer = New("Frame", {
+		Name = "Spacer",
+		LayoutOrder = self._order,
+		Size = UDim2.new(1, 0, 0, tonumber(height) or 8),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+	}, self.Scroll)
+	return self:_Register({ Object = spacer }, "Spacer", "spacer", { Persist = false })
+end
+
+function Tab:AddCustom(instance, title, description)
+	if self._destroyed or typeof(instance) ~= "Instance" or not instance:IsA("GuiObject") then
+		return nil
+	end
+	self._order = self._order + 1
+	local clone = instance:Clone()
+	clone.LayoutOrder = self._order
+	clone.Visible = true
+	clone.Parent = self.Scroll
+	return self:_Register({ Object = clone }, "Custom", title or clone.Name, {
+		Description = description,
+		Persist = false,
+	})
+end
+
+--==================================================
+-- CONSULTA / METADADOS
+--==================================================
+
+function HubLibrary:FindItem(id)
+	local entry = self._registryById[id]
+	return entry and entry.Control or nil
+end
+
+function HubLibrary:GetItems()
+	local out = {}
+	for _, entry in ipairs(self._registry) do
+		table.insert(out, entry.Control)
+	end
+	return out
+end
+
+function HubLibrary:GetMetadata(id)
+	local entry = self._registryById[id]
+	if not entry then
+		return nil
+	end
+	return {
+		Id = entry.Id,
+		Kind = entry.Kind,
+		Title = entry.Title,
+		Description = entry.Description,
+		CreatedAt = entry.CreatedAt,
+	}
+end
+
+-- Mostra/oculta um item (ele continua respeitando a busca).
+function HubLibrary:SetEnabled(control, enabled)
+	if type(control) == "string" then
+		control = self:FindItem(control)
+	end
+	local entry = type(control) == "table" and control._entry or nil
+	if not entry or not entry.Object then
+		return false
+	end
+	entry.ForceHidden = enabled == false
+	entry.Object.Visible = entry.Visible and not entry.ForceHidden
+	return not entry.ForceHidden
+end
+
+function HubLibrary:Validate()
+	local issues = {}
+	for _, entry in ipairs(self._registry) do
+		if not entry.Object or not entry.Object.Parent then
+			table.insert(issues, "Item removido: " .. tostring(entry.Id))
+		end
+	end
+	if #issues > 0 then
+		warn("[Frank Hub] Validate encontrou " .. tostring(#issues) .. " problema(s).")
+	end
+	return #issues == 0, issues
+end
+
+function HubLibrary:CleanupRegistry()
+	local cleaned = {}
+	for _, entry in ipairs(self._registry) do
+		if entry.Object and entry.Object.Parent then
+			table.insert(cleaned, entry)
+		else
+			self._registryById[entry.Id] = nil
+		end
+	end
+	self._registry = cleaned
+	return #cleaned
+end
+
+function HubLibrary:ResetAll()
+	for _, entry in ipairs(self._registry) do
+		local control = entry.Control
+		if entry.Persist and entry.Default ~= nil and control and type(control.Set) == "function" then
+			pcall(function()
+				control:Set(entry.Default)
+			end)
+		end
+	end
+	self:Fire("ConfigReset")
+	return true
+end
+
+--==================================================
+-- CONFIG / PERFIS
+--==================================================
+
+function HubLibrary:Snapshot()
+	local data = {
+		Version = 3,
+		Theme = self._themeName,
+		MenuKey = self._menuKey and self._menuKey.Name or nil,
+		State = {},
+		Values = {},
+	}
+
+	for key, value in pairs(self._state) do
+		if IsJSONSafe(value) then
+			data.State[key] = DeepCopy(value)
+		end
+	end
+
+	for _, entry in ipairs(self._registry) do
+		local control = entry.Control
+		if entry.Persist and control and type(control.Get) == "function" then
+			local ok, value = pcall(function()
+				if control._serialize then
+					return control._serialize()
 				end
-
-				if aba.Btn
-					and aba.Btn.Parent then
-					aba.Btn:Destroy()
-				end
+				return control:Get()
+			end)
+			if ok and IsJSONSafe(value) then
+				data.Values[entry.Id] = value
 			end
 		end
 	end
 
-	self.Abas = {}
-	self.AbaAtiva = nil
+	return data
+end
 
-	-- A ScreenGui criada manualmente pelo usuario NAO e destruida.
-	self.ScreenGui = nil
-	self.BackGround = nil
-	self.Templates = nil
-	self.TemplateScrollingFrame = nil
-	self.ScrollingFrame = nil
-	self.TabButtonsFrame = nil
-	self.FixedButtonsFrame = nil
+function HubLibrary:Restore(snapshot, silent)
+	if type(snapshot) ~= "table" then
+		return false
+	end
+
+	if type(snapshot.Theme) == "string" and self._themes[snapshot.Theme] then
+		self:SetTheme(snapshot.Theme)
+	end
+	if snapshot.MenuKey then
+		self:SetMenuKeybind(snapshot.MenuKey)
+	end
+
+	for id, value in pairs(snapshot.Values or {}) do
+		local entry = self._registryById[id]
+		local control = entry and entry.Control
+		if control then
+			local ok, err = pcall(function()
+				if control._deserialize then
+					control._deserialize(value, silent)
+				elseif type(control.Set) == "function" then
+					control:Set(value, silent)
+				end
+			end)
+			if not ok then
+				warn("[Frank Hub] Restore:", id, err)
+			end
+		end
+	end
+
+	for key, value in pairs(snapshot.State or {}) do
+		self:SetState(key, value, silent ~= true)
+	end
+
+	self:Refresh()
+	self:Fire("ConfigRestored", snapshot)
+	return true
+end
+
+function HubLibrary:ExportConfig()
+	local ok, result = pcall(function()
+		return HttpService:JSONEncode(self:Snapshot())
+	end)
+	if not ok then
+		warn("[Frank Hub] Falha ao exportar config:", result)
+		return nil
+	end
+	return result
+end
+
+function HubLibrary:ImportConfig(json, silent)
+	local ok, data = pcall(function()
+		return HttpService:JSONDecode(tostring(json or ""))
+	end)
+	if not ok or type(data) ~= "table" then
+		warn("[Frank Hub] JSON invalido:", data)
+		return false
+	end
+	return self:Restore(data, silent)
+end
+
+function HubLibrary:SetConfigFile(fileName)
+	local safe = tostring(fileName or "FrankHub_Default.json")
+	safe = safe:gsub("[^%w%._%-]", "_")
+	if not safe:lower():match("%.json$") then
+		safe = safe .. ".json"
+	end
+	self._configFile = safe
+	return safe
+end
+
+function HubLibrary:SaveConfig(fileName, quiet)
+	if fileName then
+		self:SetConfigFile(fileName)
+	end
+	if not FileApiAvailable() then
+		return false, "writefile/readfile/isfile indisponivel neste executor"
+	end
+	local payload = self:ExportConfig()
+	if not payload then
+		return false, "falha ao gerar JSON"
+	end
+	local ok, err = pcall(writefile, self._configFile, payload)
+	if not ok then
+		return false, err
+	end
+	if not quiet then
+		self:Notify("Config", "Config salva: " .. self._configFile, 2.5, "Success")
+	end
+	self:Fire("ConfigSaved", self._configFile)
+	return true
+end
+
+function HubLibrary:LoadConfig(fileName, silent)
+	if fileName then
+		self:SetConfigFile(fileName)
+	end
+	if not FileApiAvailable() then
+		return false, "readfile/isfile indisponivel neste executor"
+	end
+	local okExists, exists = pcall(isfile, self._configFile)
+	if not okExists or not exists then
+		return false, "arquivo nao encontrado"
+	end
+	local ok, contents = pcall(readfile, self._configFile)
+	if not ok then
+		return false, contents
+	end
+	local restored = self:ImportConfig(contents, silent)
+	if restored then
+		self:Notify("Config", "Config carregada: " .. self._configFile, 2.5, "Success")
+		self:Fire("ConfigLoaded", self._configFile)
+	end
+	return restored
+end
+
+function HubLibrary:SetAutoSave(enabled, fileName)
+	self._autoSave = enabled == true
+	if fileName then
+		self:SetConfigFile(fileName)
+	end
+	return self._autoSave
+end
+
+function HubLibrary:_AutoSaveTick()
+	if not self._autoSave or self._destroyed then
+		return
+	end
+	self._saveToken = (self._saveToken or 0) + 1
+	local token = self._saveToken
+	task.delay(1, function()
+		if self._destroyed or token ~= self._saveToken then
+			return
+		end
+		self:SaveConfig(nil, true)
+	end)
+end
+
+function HubLibrary:SaveProfile(name)
+	name = tostring(name or "Default")
+	self._profiles[name] = self:Snapshot()
+	self._currentProfile = name
+	self:Fire("ProfileSaved", name)
+	return true
+end
+
+function HubLibrary:LoadProfile(name)
+	name = tostring(name or "Default")
+	local snapshot = self._profiles[name]
+	if not snapshot then
+		return false
+	end
+	self._currentProfile = name
+	return self:Restore(snapshot)
+end
+
+function HubLibrary:DeleteProfile(name)
+	name = tostring(name or "Default")
+	if name == "Default" then
+		return false
+	end
+	self._profiles[name] = nil
+	if self._currentProfile == name then
+		self._currentProfile = "Default"
+	end
+	return true
+end
+
+function HubLibrary:GetProfiles()
+	local names = {}
+	for name in pairs(self._profiles) do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	return names
+end
+
+--==================================================
+-- ABA DE CONFIG PADRAO (botao "Config")
+--==================================================
+
+function HubLibrary:_BuildConfigTab()
+	local tab = self:AddTab("Config")
+	tab.Persist = false -- itens desta aba nao entram no arquivo de config
+
+	tab:AddSection("Aparencia")
+	local themeDropdown = tab:AddDropdown("Tema", self:GetThemes(), function(name)
+		self:SetTheme(name)
+	end, self._themeName)
+	self:On("ThemeChanged", function(_, name)
+		if themeDropdown and themeDropdown.Object and themeDropdown.Object.Parent then
+			themeDropdown:Set(name, true)
+		end
+	end)
+	tab:AddToggle("Animacoes", function(value)
+		self:SetAnimationsEnabled(value)
+	end, self._animations)
+	tab:AddKeybind("Tecla do menu", self._menuKey, nil, "Abre/fecha o menu", function(newKey)
+		self:SetMenuKeybind(newKey)
+	end)
+
+	tab:AddSection("Configuracao")
+	tab:AddToggle("Auto salvar", function(value)
+		self:SetAutoSave(value)
+	end, self._autoSave)
+	tab:AddButton("Salvar config", function()
+		local ok, err = self:SaveConfig()
+		if not ok then
+			self:Notify("Config", tostring(err), 4, "Error")
+		end
+	end)
+	tab:AddButton("Carregar config", function()
+		local ok, err = self:LoadConfig()
+		if not ok then
+			self:Notify("Config", tostring(err), 4, "Error")
+		end
+	end)
+	tab:AddButton("Restaurar padrao", function()
+		self:ResetAll()
+		self:Notify("Config", "Valores padrao restaurados.", 2.5, "Info")
+	end)
+
+	tab:AddSection("Hub")
+	tab:AddButton("Descarregar hub", function()
+		self:Destroy()
+	end)
+
+	return tab
+end
+
+function HubLibrary:OpenConfig()
+	if self._destroyed then
+		return
+	end
+	if self.ConfigCallback then
+		Call(self.ConfigCallback)
+		return
+	end
+	if not self.ConfigTab or self.ConfigTab._destroyed then
+		self.ConfigTab = self:_BuildConfigTab()
+	end
+	self:SelecionarAba(self.ConfigTab)
 end
 
 return HubLibrary
