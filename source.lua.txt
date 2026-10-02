@@ -322,13 +322,8 @@ function HubLibrary._CriarInterface()
 
 	local BackGroundTop = Instance.new("Frame")
 	BackGroundTop.Name = "BackGroundTop"
-	BackGroundTop.Position = UDim2Exact(
-		0,
-		0,
-		-0.013656365685164928,
-		0
-	)
-	BackGroundTop.Size = UDim2Exact(0, 534, 0, -57)
+	BackGroundTop.Position = UDim2Exact(0, 0, 0, 0)
+	BackGroundTop.Size = UDim2Exact(0, 534, 0, 58)
 	BackGroundTop.BackgroundColor3 = Color3Exact(
 		234 / 255,
 		0,
@@ -381,20 +376,15 @@ function HubLibrary._CriarInterface()
 
 	local TabButtonsFrame = Instance.new("Frame")
 	TabButtonsFrame.Name = "TabButtonsFrame"
-	TabButtonsFrame.Position = UDim2Exact(
-		-0.3333333432674408,
-		0,
-		0.026639344170689583,
-		0
-	)
-	TabButtonsFrame.Size = UDim2Exact(0, 169, 0, 461)
+	TabButtonsFrame.Position = UDim2Exact(0, 10, 0, 66)
+	TabButtonsFrame.Size = UDim2Exact(0, 132, 0, 410)
 	TabButtonsFrame.BackgroundTransparency = 1
 	TabButtonsFrame.Parent = BackGround
 
 	local TabLayout = Instance.new("UIListLayout")
 	TabLayout.Name = "UIListLayout"
-	TabLayout.Padding = UDimExact(0, 75)
-	TabLayout.FillDirection = Enum.FillDirection.Horizontal
+	TabLayout.Padding = UDimExact(0, 8)
+	TabLayout.FillDirection = Enum.FillDirection.Vertical
 	TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -403,13 +393,8 @@ function HubLibrary._CriarInterface()
 	-- Aba1: template desenhado a mao.
 	local Aba1 = Instance.new("TextButton")
 	Aba1.Name = "Aba1"
-	Aba1.Position = UDim2Exact(
-		0.08875739574432373,
-		0,
-		0.12364425510168076,
-		0
-	)
-	Aba1.Size = UDim2Exact(0, 153, 0, -57)
+	Aba1.Position = UDim2Exact(0, 0, 0, 0)
+	Aba1.Size = UDim2Exact(0, 128, 0, 42)
 	Aba1.BackgroundColor3 = Color3Exact(
 		234 / 255,
 		0,
@@ -421,7 +406,7 @@ function HubLibrary._CriarInterface()
 	Aba1.TextSize = 25
 	Aba1.TextScaled = false
 	Aba1.TextWrapped = true
-	Aba1.TextXAlignment = Enum.TextXAlignment.Right
+	Aba1.TextXAlignment = Enum.TextXAlignment.Center
 	Aba1.TextYAlignment = Enum.TextYAlignment.Center
 	Aba1.AutoButtonColor = true
 	Aba1.Visible = false
@@ -485,20 +470,15 @@ function HubLibrary._CriarInterface()
 
 	local ScrollingFrame = Instance.new("ScrollingFrame")
 	ScrollingFrame.Name = "ScrollingFrame"
-	ScrollingFrame.Position = UDim2Exact(
-		0.018726591020822525,
-		0,
-		0.026639344170689583,
-		0
-	)
-	ScrollingFrame.Size = UDim2Exact(0, 524, 0, 464)
+	ScrollingFrame.Position = UDim2Exact(0, 146, 0, 66)
+	ScrollingFrame.Size = UDim2Exact(0, 378, 0, 410)
 	ScrollingFrame.BackgroundColor3 = Color3Exact(1, 1, 1)
 	ScrollingFrame.BackgroundTransparency = 1
 	ScrollingFrame.BorderSizePixel = 0
 	ScrollingFrame.ScrollBarThickness = 6
 	ScrollingFrame.ScrollBarImageColor3 = Color3Exact(0, 0, 0)
 	ScrollingFrame.ScrollBarImageTransparency = 0
-	ScrollingFrame.CanvasSize = UDim2Exact(0, 0, 2, 0)
+	ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 	ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.None
 	ScrollingFrame.ScrollingDirection = Enum.ScrollingDirection.XY
 	ScrollingFrame.Visible = false
@@ -509,7 +489,7 @@ function HubLibrary._CriarInterface()
 	ScrollLayout.Name = "UIListLayout"
 	ScrollLayout.FillDirection = Enum.FillDirection.Vertical
 	ScrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	ScrollLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	ScrollLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 	ScrollLayout.Padding = UDimExact(0, 6)
 	ScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	ScrollLayout.Parent = ScrollingFrame
@@ -541,7 +521,7 @@ function HubLibrary._CriarInterface()
 		0.17213115096092224,
 		0
 	)
-	InfoCardTemplate.Size = UDim2Exact(0, 503, 0, 194)
+	InfoCardTemplate.Size = UDim2Exact(0, 360, 0, 125)
 	InfoCardTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
 	InfoCardTemplate.BackgroundTransparency = 0.45
 	InfoCardTemplate.BorderSizePixel = 0
@@ -670,7 +650,7 @@ function HubLibrary._CriarInterface()
 		0.032087452709674835,
 		0
 	)
-	ToggleTemplate.Size = UDim2Exact(0, 503, 0, 50)
+	ToggleTemplate.Size = UDim2Exact(0, 360, 0, 50)
 	ToggleTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
 	ToggleTemplate.BackgroundTransparency = 0.45
 	ToggleTemplate.BorderSizePixel = 0
@@ -768,7 +748,7 @@ function HubLibrary._CriarInterface()
 		0.032087452709674835,
 		0
 	)
-	DropdownTemplate.Size = UDim2Exact(0, 503, 0, 50)
+	DropdownTemplate.Size = UDim2Exact(0, 360, 0, 60)
 	DropdownTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
 	DropdownTemplate.BackgroundTransparency = 0.45
 	DropdownTemplate.BorderSizePixel = 0
@@ -902,7 +882,7 @@ function HubLibrary._CriarInterface()
 		0.032087452709674835,
 		0
 	)
-	SliderTemplate.Size = UDim2Exact(0, 503, 0, 50)
+	SliderTemplate.Size = UDim2Exact(0, 360, 0, 60)
 	SliderTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
 	SliderTemplate.BackgroundTransparency = 0.45
 	SliderTemplate.BorderSizePixel = 0
@@ -1296,22 +1276,17 @@ function HubLibrary.Carregar(nomeDoHub)
 	if not FixedFrame then
 		FixedFrame = Instance.new("Frame")
 		FixedFrame.Name = "TabButtonsFrame"
-		FixedFrame.Position = UDim2Exact(
-			1.0430711507797241,
-			0,
-			0.026639344170689583,
-			0
-		)
-		FixedFrame.Size = UDim2Exact(0, 169, 0, 461)
+		FixedFrame.Position = UDim2Exact(0, 146, 0, 441)
+		FixedFrame.Size = UDim2Exact(0, 378, 0, 36)
 		FixedFrame.BackgroundTransparency = 1
 		FixedFrame.Parent = self.BackGround
 
 		local fixedLayout = Instance.new("UIListLayout")
 		fixedLayout.Name = "UIListLayout"
 		fixedLayout.FillDirection = Enum.FillDirection.Horizontal
-		fixedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+		fixedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 		fixedLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-		fixedLayout.Padding = UDimExact(0, 75)
+		fixedLayout.Padding = UDimExact(0, 12)
 		fixedLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		fixedLayout.Parent = FixedFrame
 
@@ -3852,11 +3827,40 @@ function HubLibrary.Carregar(nomeDoHub)
 		end)
 		HubLibrary._Active = nil
 	end
+
 	local hub = _OriginalCarregar(nomeDoHub)
-	if hub then
-		EnhanceAfterLoad(hub, nomeDoHub)
-		HubLibrary._Active = hub
+	if not hub then
+		return nil
 	end
+
+	EnhanceAfterLoad(hub, nomeDoHub)
+
+	-- A interface original do RBXM ja possuia uma aba Farm.
+	-- Criamos a aba automaticamente no modo externo para que
+	-- a biblioteca abra completa mesmo quando nenhum script de
+	-- exemplo foi executado depois do loader.
+	if #(hub.Abas or {}) == 0 then
+		local farm = hub:AddTab("Farm")
+		if farm then
+			farm:AddInfoCard(
+				"Egg Predictor",
+				"rbxasset://textures/ui/GuiImagePlaceholder.png",
+				{"3.03x", "Predictor ativo"}
+			)
+			farm:AddToggle("Auto Steal", nil, false)
+			farm:AddDropdown(
+				"Target Areas",
+				{"Area 1", "Area 2", "Area 3"},
+				nil,
+				"Area 1"
+			)
+			farm:AddSlider("Min Value To Steal", 0, 100, 25, nil)
+			hub:SelecionarAba(farm)
+		end
+	end
+
+	hub:Refresh()
+	HubLibrary._Active = hub
 	return hub
 end
 
