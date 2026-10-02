@@ -1,2357 +1,1357 @@
---==================================================
--- FRANK HUB LIBRARY
--- INTERFACE EXTRAIDA DO MenuHub.rbxm
---
--- Esta versao:
--- 1) recria a interface enviada pelo usuario no PlayerGui;
--- 2) usa os templates desenhados manualmente no .rbxm;
--- 3) conecta AddTab/AddToggle/AddSlider/AddDropdown/AddInfoCard/AddButton;
--- 4) funciona como loader externo: nao depende de ModuleScript no jogo alvo.
---
--- Estrutura criada:
--- Menu Hub [ScreenGui]
--- └─ BackGround
---    ├─ BackGroundTop
---    ├─ TabButtonsFrame
---    │  ├─ UIListLayout
---    │  └─ Aba1
---    ├─ ScrollingFrame
---    │  ├─ UIListLayout
---    │  └─ Templates
---    │     ├─ InfoCardTemplate
---    │     ├─ ToggleTemplate
---    │     ├─ DropdownTemplate
---    │     └─ SliderTemplate
---    ├─ Close
---    ├─ TabButtonsFrame
---    │  ├─ UIListLayout
---    │  ├─ DiscordButton
---    │  └─ ConfigButton
---    └─ MenuName
---
--- Observacao:
--- Alguns valores do .rbxm original possuem offsets negativos.
--- Eles sao mantidos abaixo para preservar o desenho enviado.
--- A ScreenGui e ativada em runtime para que a interface apareca.
---==================================================
+-- Frank Hub Library - interface recriada diretamente do MenuHub.rbxm
+-- O visual abaixo usa os nomes, tamanhos, cores, fontes e hierarquia do arquivo enviado.
 
 local HubLibrary = {}
 HubLibrary.__index = HubLibrary
 
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
-
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
---==================================================
--- CONSTANTES VISUAIS
---==================================================
-
-local COR_FUNDO = Color3.fromRGB(0, 0, 0)
-local COR_TOPO = Color3.fromRGB(234, 0, 8)
-local COR_BORDA = Color3.fromRGB(0, 0, 0)
-local COR_CARD = Color3.fromRGB(0, 0, 0)
-local COR_CONTROLE = Color3.fromRGB(0, 0, 0)
-local COR_VERDE = Color3.fromRGB(0, 255, 17)
-
-local COR_TAB_NORMAL = Color3.fromRGB(234, 0, 8)
-local COR_TAB_ATIVA = Color3.fromRGB(255, 25, 32)
-local COR_TEXTO = Color3.fromRGB(255, 255, 255)
-
---==================================================
--- FUNCOES AUXILIARES
---==================================================
-
-local function UDim2Exact(xs, xo, ys, yo)
-	return UDim2.new(xs, xo, ys, yo)
-end
-
-local function UDimExact(scale, offset)
-	return UDim.new(scale, offset)
-end
-
-local function Color3Exact(r, g, b)
-	return Color3.new(r, g, b)
-end
-
-local function SetSafe(instance, property, value)
-	if instance == nil then
-		return
+local function E(enumName, value)
+	local enumType = Enum[enumName]
+	if not enumType then return nil end
+	for _, item in ipairs(enumType:GetEnumItems()) do
+		if item.Value == value then return item end
 	end
-
-	pcall(function()
-		instance[property] = value
-	end)
-end
-
-local function AplicarBorda(parent, thickness, color, borderPosition)
-	if not parent then
-		return nil
-	end
-
-	local stroke = parent:FindFirstChildOfClass("UIStroke")
-
-	if not stroke then
-		stroke = Instance.new("UIStroke")
-		stroke.Parent = parent
-	end
-
-	stroke.Thickness = thickness or 3
-	stroke.Color = color or COR_BORDA
-
-	if borderPosition ~= nil then
-		SetSafe(stroke, "BorderStrokePosition", borderPosition)
-	end
-
-	SetSafe(stroke, "ApplyStrokeMode", Enum.ApplyStrokeMode.Border)
-	SetSafe(stroke, "LineJoinMode", Enum.LineJoinMode.Round)
-
-	return stroke
-end
-
-local function CriarStroke(parent, name, thickness, color, applyMode, borderPosition, lineJoin)
-	local stroke = Instance.new("UIStroke")
-	stroke.Name = name or "UIStroke"
-	stroke.Thickness = thickness or 3
-	stroke.Color = color or COR_BORDA
-	stroke.Parent = parent
-
-	if applyMode ~= nil then
-		SetSafe(stroke, "ApplyStrokeMode", applyMode)
-	end
-
-	if borderPosition ~= nil then
-		SetSafe(stroke, "BorderStrokePosition", borderPosition)
-	end
-
-	if lineJoin ~= nil then
-		SetSafe(stroke, "LineJoinMode", lineJoin)
-	end
-
-	return stroke
-end
-
-local function CriarCorner(parent, radius)
-	local corner = Instance.new("UICorner")
-	corner.Name = "UICorner"
-
-	local r = radius or 5
-	corner.CornerRadius = UDim.new(0, r)
-	corner.Parent = parent
-
-	return corner
-end
-
-local function ExecutarCallback(callback, ...)
-	if typeof(callback) ~= "function" then
-		return
-	end
-
-	local args = table.pack(...)
-
-	task.spawn(function()
-		local ok, err = pcall(function()
-			callback(table.unpack(args, 1, args.n))
-		end)
-
-		if not ok then
-			warn("[Frank Hub] Callback:", err)
-		end
-	end)
-end
-
-local function Conectar(lista, signal, callback)
-	if not signal then
-		return nil
-	end
-
-	local connection = signal:Connect(callback)
-	table.insert(lista, connection)
-	return connection
-end
-
-local function DesconectarLista(lista)
-	if not lista then
-		return
-	end
-
-	for _, connection in ipairs(lista) do
-		if typeof(connection) == "RBXScriptConnection" then
-			pcall(function()
-				connection:Disconnect()
-			end)
-		end
-	end
-
-	table.clear(lista)
-end
-
-local function FontFromFamily(family, weight, italic)
-	local style = italic and Enum.FontStyle.Italic or Enum.FontStyle.Normal
-	local fontWeight
-
-	if (weight or 400) >= 900 then
-		fontWeight = Enum.FontWeight.Black
-	elseif (weight or 400) >= 700 then
-		fontWeight = Enum.FontWeight.Bold
-	elseif (weight or 400) >= 600 then
-		fontWeight = Enum.FontWeight.SemiBold
-	else
-		fontWeight = Enum.FontWeight.Regular
-	end
-
-	local ok, result = pcall(function()
-		return Font.new(family, fontWeight, style)
-	end)
-
-	if ok then
-		return result
-	end
-
-	return Font.new("rbxasset://fonts/families/Arial.json", fontWeight, style)
-end
-
-local function SetTextFont(instance, family, weight, italic)
-	if not instance then
-		return
-	end
-
-	local font = FontFromFamily(family, weight, italic)
-
-	SetSafe(instance, "FontFace", font)
-
-	-- Fallback para ambientes que ainda expõem Font.
-	if family:find("GothamSSm", 1, true) then
-		SetSafe(instance, "Font", Enum.Font.GothamBold)
-	elseif weight >= 700 then
-		SetSafe(instance, "Font", italic and Enum.Font.SourceSansItalic or Enum.Font.SourceSansBold)
-	else
-		SetSafe(instance, "Font", Enum.Font.SourceSans)
-	end
-end
-
-local function SetLabelProps(label, props)
-	for property, value in pairs(props) do
-		SetSafe(label, property, value)
-	end
-end
-
-local function EncontrarFilho(parent, name, className)
-	if not parent then
-		return nil
-	end
-
-	local child = parent:FindFirstChild(name)
-
-	if child and (not className or child:IsA(className)) then
-		return child
-	end
-
 	return nil
 end
 
-local function EncontrarPrimeiro(parent, className)
-	if not parent then
-		return nil
-	end
-
-	return parent:FindFirstChildWhichIsA(className, true)
+local function SetSafe(instance, property, value)
+	if value == nil then return end
+	pcall(function() instance[property] = value end)
 end
 
-local function DestruirSeExistir(parent, name)
-	local old = parent and parent:FindFirstChild(name)
-	if old then
-		old:Destroy()
-	end
+local function Callback(callback, ...)
+	if typeof(callback) ~= "function" then return end
+	local args = table.pack(...)
+	task.spawn(function()
+		local ok, err = pcall(function() callback(table.unpack(args, 1, args.n)) end)
+		if not ok then warn("[Frank Hub] Callback:", err) end
+	end)
 end
 
---==================================================
--- CONSTRUCAO EXATA DA INTERFACE DO RBXM
---==================================================
-
-function HubLibrary._CriarInterface()
+function HubLibrary._CreateInterface()
 	local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-	-- Remove apenas uma copia anterior feita pela biblioteca.
-	local antiga = PlayerGui:FindFirstChild("Menu Hub")
-	if antiga then
-		antiga:Destroy()
-	end
-
-	--==================================================
-	-- ScreenGui
-	--==================================================
+	local old = PlayerGui:FindFirstChild("Menu Hub")
+	if old then old:Destroy() end
 
 	local ScreenGui = Instance.new("ScreenGui")
 	ScreenGui.Name = "Menu Hub"
-	ScreenGui.ResetOnSpawn = true
-	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-	-- O arquivo enviado estava com Enabled=false.
-	-- Para o teste externo a interface precisa ficar visivel.
-	ScreenGui.Enabled = true
 	ScreenGui.Parent = PlayerGui
+	SetSafe(ScreenGui, "Enabled", false)
+	SetSafe(ScreenGui, "ZIndexBehavior", E("ZIndexBehavior", 1))
+	-- O RBXM original estava Enabled=false; para o teste externo a interface precisa estar visivel.
+	ScreenGui.Enabled = true
 
-	--==================================================
-	-- BackGround
-	--==================================================
+	local i1 = Instance.new("Frame")
+	i1.Name = "BackGround"
+	i1.Parent = ScreenGui
+	SetSafe(i1, "Active", false)
+	SetSafe(i1, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i1, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i1, "BackgroundTransparency", 0.5)
+	SetSafe(i1, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i1, "BorderSizePixel", 0)
+	SetSafe(i1, "ClipsDescendants", false)
+	SetSafe(i1, "LayoutOrder", 0)
+	SetSafe(i1, "Position", UDim2.new(0.306561142206192, 0, 0.1720733493566513, 0))
+	SetSafe(i1, "Rotation", 0)
+	SetSafe(i1, "Size", UDim2.new(0, 534, 0, 488))
+	SetSafe(i1, "Visible", true)
+	SetSafe(i1, "ZIndex", 1)
 
-	local BackGround = Instance.new("Frame")
-	BackGround.Name = "BackGround"
-	BackGround.Position = UDim2Exact(
-		0.306561142206192,
-		0,
-		0.1720733493566513,
-		0
-	)
-	BackGround.Size = UDim2Exact(0, 534, 0, 488)
-	BackGround.BackgroundColor3 = Color3Exact(0, 0, 0)
-	BackGround.BackgroundTransparency = 0.5
-	BackGround.BorderSizePixel = 0
-	BackGround.Visible = true
-	BackGround.ZIndex = 1
-	BackGround.Parent = ScreenGui
+	local i2 = Instance.new("UICorner")
+	i2.Name = "UICorner"
+	i2.Parent = i1
+	SetSafe(i2, "BottomLeftRadius", UDim.new(0, 2))
+	SetSafe(i2, "BottomRightRadius", UDim.new(0, 2))
+	SetSafe(i2, "TopLeftRadius", UDim.new(0, 2))
+	SetSafe(i2, "TopRightRadius", UDim.new(0, 2))
 
-	CriarCorner(BackGround, 5)
-	CriarStroke(BackGround, "UIStroke", 3, COR_BORDA, Enum.ApplyStrokeMode.Border, Enum.BorderStrokePosition.Outer)
+	local i3 = Instance.new("UIStroke")
+	i3.Name = "UIStroke"
+	i3.Parent = i1
+	SetSafe(i3, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i3, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i3, "Color", Color3.new(0, 0, 0))
+	SetSafe(i3, "Enabled", true)
+	SetSafe(i3, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i3, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i3, "Thickness", 3.0)
+	SetSafe(i3, "Transparency", 0)
+	SetSafe(i3, "ZIndex", 1)
 
-	--==================================================
-	-- BackGroundTop
-	--==================================================
+	local i4 = Instance.new("Frame")
+	i4.Name = "BackGroundTop"
+	i4.Parent = i1
+	SetSafe(i4, "Active", false)
+	SetSafe(i4, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i4, "BackgroundColor3", Color3.new(0.917647123336792, 0, 0.0313725508749485))
+	SetSafe(i4, "BackgroundTransparency", 0)
+	SetSafe(i4, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i4, "BorderSizePixel", 0)
+	SetSafe(i4, "ClipsDescendants", false)
+	SetSafe(i4, "LayoutOrder", 0)
+	SetSafe(i4, "Position", UDim2.new(0, 0, -0.013656365685164928, 0))
+	SetSafe(i4, "Rotation", 0)
+	SetSafe(i4, "Size", UDim2.new(0, 534, 0, -57))
+	SetSafe(i4, "Visible", true)
+	SetSafe(i4, "ZIndex", 1)
 
-	local BackGroundTop = Instance.new("Frame")
-	BackGroundTop.Name = "BackGroundTop"
-	BackGroundTop.Position = UDim2Exact(
-		0,
-		0,
-		-0.013656365685164928,
-		0
-	)
-	BackGroundTop.Size = UDim2Exact(0, 534, 0, -57)
-	BackGroundTop.BackgroundColor3 = Color3Exact(
-		234 / 255,
-		0,
-		8 / 255
-	)
-	BackGroundTop.BackgroundTransparency = 0
-	BackGroundTop.BorderSizePixel = 0
-	BackGroundTop.Parent = BackGround
+	local i5 = Instance.new("UIStroke")
+	i5.Name = "UIStroke"
+	i5.Parent = i4
+	SetSafe(i5, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i5, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i5, "Color", Color3.new(0, 0, 0))
+	SetSafe(i5, "Enabled", true)
+	SetSafe(i5, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i5, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i5, "Thickness", 3.0)
+	SetSafe(i5, "Transparency", 0)
+	SetSafe(i5, "ZIndex", 1)
 
-	CriarStroke(
-		BackGroundTop,
-		"UIStroke",
-		3,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i6 = Instance.new("Frame")
+	i6.Name = "UIStroke"
+	i6.Parent = i4
+	SetSafe(i6, "Active", false)
+	SetSafe(i6, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i6, "BackgroundColor3", Color3.new(0.33725491166114807, 0, 0.01568627543747425))
+	SetSafe(i6, "BackgroundTransparency", 0)
+	SetSafe(i6, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i6, "BorderSizePixel", 0)
+	SetSafe(i6, "ClipsDescendants", false)
+	SetSafe(i6, "LayoutOrder", 0)
+	SetSafe(i6, "Position", UDim2.new(-0.00187265919521451, 0, 1.0, 0))
+	SetSafe(i6, "Rotation", 0)
+	SetSafe(i6, "Size", UDim2.new(0, 536, 0, 6))
+	SetSafe(i6, "Visible", true)
+	SetSafe(i6, "ZIndex", 1)
 
-	-- Decorative Frame named UIStroke.
-	local TopDecoration = Instance.new("Frame")
-	TopDecoration.Name = "UIStroke"
-	TopDecoration.Position = UDim2Exact(
-		-0.00187265919521451,
-		0,
-		1,
-		0
-	)
-	TopDecoration.Size = UDim2Exact(0, 536, 0, 6)
-	TopDecoration.BackgroundColor3 = Color3Exact(
-		0.33725491166114807,
-		0,
-		0.01568627543747425
-	)
-	TopDecoration.BackgroundTransparency = 0
-	TopDecoration.BorderSizePixel = 0
-	TopDecoration.Parent = BackGroundTop
+	local i7 = Instance.new("UIStroke")
+	i7.Name = "UIStroke"
+	i7.Parent = i6
+	SetSafe(i7, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i7, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i7, "Color", Color3.new(0, 0, 0))
+	SetSafe(i7, "Enabled", true)
+	SetSafe(i7, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i7, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i7, "Thickness", 2.0)
+	SetSafe(i7, "Transparency", 0)
+	SetSafe(i7, "ZIndex", 1)
 
-	CriarStroke(
-		TopDecoration,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i8 = Instance.new("Frame")
+	i8.Name = "TabButtonsFrame"
+	i8.Parent = i1
+	SetSafe(i8, "Active", false)
+	SetSafe(i8, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i8, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i8, "BackgroundTransparency", 1.0)
+	SetSafe(i8, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i8, "BorderSizePixel", 0)
+	SetSafe(i8, "ClipsDescendants", false)
+	SetSafe(i8, "LayoutOrder", 0)
+	SetSafe(i8, "Position", UDim2.new(-0.3333333432674408, 0, 0.026639344170689583, 0))
+	SetSafe(i8, "Rotation", 0)
+	SetSafe(i8, "Size", UDim2.new(0, 169, 0, 461))
+	SetSafe(i8, "Visible", true)
+	SetSafe(i8, "ZIndex", 1)
 
-	--==================================================
-	-- Primeiro TabButtonsFrame
-	--==================================================
+	local i9 = Instance.new("UIListLayout")
+	i9.Name = "UIListLayout"
+	i9.Parent = i8
+	SetSafe(i9, "FillDirection", E("FillDirection", 0))
+	SetSafe(i9, "HorizontalAlignment", E("HorizontalAlignment", 0))
+	SetSafe(i9, "Padding", UDim.new(0, 75))
+	SetSafe(i9, "SortOrder", E("SortOrder", 2))
+	SetSafe(i9, "VerticalAlignment", E("VerticalAlignment", 1))
+	SetSafe(i9, "Wraps", true)
 
-	local TabButtonsFrame = Instance.new("Frame")
-	TabButtonsFrame.Name = "TabButtonsFrame"
-	TabButtonsFrame.Position = UDim2Exact(
-		-0.3333333432674408,
-		0,
-		0.026639344170689583,
-		0
-	)
-	TabButtonsFrame.Size = UDim2Exact(0, 169, 0, 461)
-	TabButtonsFrame.BackgroundTransparency = 1
-	TabButtonsFrame.Parent = BackGround
+	local i10 = Instance.new("TextButton")
+	i10.Name = "Aba1"
+	i10.Parent = i8
+	SetSafe(i10, "Active", false)
+	SetSafe(i10, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i10, "BackgroundColor3", Color3.new(0.9176470637321472, 0, 0.0313725508749485))
+	SetSafe(i10, "BackgroundTransparency", 0)
+	SetSafe(i10, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i10, "BorderSizePixel", 0)
+	SetSafe(i10, "ClipsDescendants", false)
+	SetSafe(i10, "FontFace", Font.new("rbxasset://fonts/families/LegacyArial.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i10, "LayoutOrder", 0)
+	SetSafe(i10, "Position", UDim2.new(0.08875739574432373, 0, 0.12364425510168076, 0))
+	SetSafe(i10, "Rotation", 0)
+	SetSafe(i10, "Size", UDim2.new(0, 153, 0, -57))
+	SetSafe(i10, "Text", "Farm")
+	SetSafe(i10, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i10, "TextScaled", false)
+	SetSafe(i10, "TextSize", 25.0)
+	SetSafe(i10, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i10, "TextStrokeTransparency", 1.0)
+	SetSafe(i10, "TextTransparency", 0)
+	SetSafe(i10, "TextWrapped", true)
+	SetSafe(i10, "TextXAlignment", 2)
+	SetSafe(i10, "TextYAlignment", 1)
+	SetSafe(i10, "Visible", true)
+	SetSafe(i10, "ZIndex", 1)
 
-	local TabLayout = Instance.new("UIListLayout")
-	TabLayout.Name = "UIListLayout"
-	TabLayout.Padding = UDimExact(0, 75)
-	TabLayout.FillDirection = Enum.FillDirection.Horizontal
-	TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	TabLayout.Parent = TabButtonsFrame
+	local i11 = Instance.new("UIStroke")
+	i11.Name = "UIStroke"
+	i11.Parent = i10
+	SetSafe(i11, "ApplyStrokeMode", E("ApplyStrokeMode", 1))
+	SetSafe(i11, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i11, "Color", Color3.new(0, 0, 0))
+	SetSafe(i11, "Enabled", true)
+	SetSafe(i11, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i11, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i11, "Thickness", 3.0)
+	SetSafe(i11, "Transparency", 0)
+	SetSafe(i11, "ZIndex", 1)
 
-	-- Aba1: template desenhado a mao.
-	local Aba1 = Instance.new("TextButton")
-	Aba1.Name = "Aba1"
-	Aba1.Position = UDim2Exact(
-		0.08875739574432373,
-		0,
-		0.12364425510168076,
-		0
-	)
-	Aba1.Size = UDim2Exact(0, 153, 0, -57)
-	Aba1.BackgroundColor3 = Color3Exact(
-		234 / 255,
-		0,
-		8 / 255
-	)
-	Aba1.BorderSizePixel = 0
-	Aba1.Text = "Farm"
-	Aba1.TextColor3 = Color3Exact(1, 1, 1)
-	Aba1.TextSize = 25
-	Aba1.TextScaled = false
-	Aba1.TextWrapped = true
-	Aba1.TextXAlignment = Enum.TextXAlignment.Right
-	Aba1.TextYAlignment = Enum.TextYAlignment.Center
-	Aba1.AutoButtonColor = true
-	Aba1.Visible = false
-	Aba1.ZIndex = 1
-	SetTextFont(
-		Aba1,
-		"rbxasset://fonts/families/LegacyArial.json",
-		700,
-		false
-	)
-	Aba1.Parent = TabButtonsFrame
+	local i12 = Instance.new("Frame")
+	i12.Name = "UiStroke"
+	i12.Parent = i10
+	SetSafe(i12, "Active", false)
+	SetSafe(i12, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i12, "BackgroundColor3", Color3.new(0.5098039507865906, 0, 0.02352941408753395))
+	SetSafe(i12, "BackgroundTransparency", 0)
+	SetSafe(i12, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i12, "BorderSizePixel", 0)
+	SetSafe(i12, "ClipsDescendants", false)
+	SetSafe(i12, "LayoutOrder", 0)
+	SetSafe(i12, "Position", UDim2.new(0, 0, 0.8771929740905762, 0))
+	SetSafe(i12, "Rotation", 0)
+	SetSafe(i12, "Size", UDim2.new(0, 153, 0, 7))
+	SetSafe(i12, "Visible", true)
+	SetSafe(i12, "ZIndex", 1)
 
-	CriarStroke(
-		Aba1,
-		"UIStroke",
-		3,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i13 = Instance.new("UIStroke")
+	i13.Name = "UIStrokeTest"
+	i13.Parent = i10
+	SetSafe(i13, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i13, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i13, "Color", Color3.new(0, 0, 0))
+	SetSafe(i13, "Enabled", true)
+	SetSafe(i13, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i13, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i13, "Thickness", 3.0)
+	SetSafe(i13, "Transparency", 0)
+	SetSafe(i13, "ZIndex", 1)
 
-	local AbaDecoration = Instance.new("Frame")
-	AbaDecoration.Name = "UiStroke"
-	AbaDecoration.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	AbaDecoration.Size = UDim2Exact(0, 503, 0, 50)
-	AbaDecoration.BackgroundColor3 = Color3Exact(
-		1,
-		1,
-		1
-	)
-	AbaDecoration.BackgroundTransparency = 1
-	AbaDecoration.BorderSizePixel = 0
-	AbaDecoration.Parent = Aba1
+	local i14 = Instance.new("ScrollingFrame")
+	i14.Name = "ScrollingFrame"
+	i14.Parent = i1
+	SetSafe(i14, "Active", true)
+	SetSafe(i14, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i14, "AutomaticCanvasSize", 0)
+	SetSafe(i14, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i14, "BackgroundTransparency", 1.0)
+	SetSafe(i14, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i14, "BorderSizePixel", 0)
+	SetSafe(i14, "CanvasSize", UDim2.new(0, 0, 2.0, 0))
+	SetSafe(i14, "ClipsDescendants", true)
+	SetSafe(i14, "LayoutOrder", 0)
+	SetSafe(i14, "Position", UDim2.new(0.018726591020822525, 0, 0.026639344170689583, 0))
+	SetSafe(i14, "Rotation", 0)
+	SetSafe(i14, "ScrollBarImageTransparency", 0)
+	SetSafe(i14, "ScrollBarThickness", 6)
+	SetSafe(i14, "ScrollingDirection", E("ScrollingDirection", 4))
+	SetSafe(i14, "Size", UDim2.new(0, 524, 0, 464))
+	SetSafe(i14, "Visible", true)
+	SetSafe(i14, "ZIndex", 1)
 
-	CriarStroke(
-		AbaDecoration,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i15 = Instance.new("UIListLayout")
+	i15.Name = "UIListLayout"
+	i15.Parent = i14
+	SetSafe(i15, "FillDirection", E("FillDirection", 1))
+	SetSafe(i15, "HorizontalAlignment", E("HorizontalAlignment", 1))
+	SetSafe(i15, "Padding", UDim.new(0, 6))
+	SetSafe(i15, "SortOrder", E("SortOrder", 2))
+	SetSafe(i15, "VerticalAlignment", E("VerticalAlignment", 1))
+	SetSafe(i15, "Wraps", false)
 
-	CriarStroke(
-		Aba1,
-		"UIStrokeTest",
-		3,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i16 = Instance.new("Folder")
+	i16.Name = "Templates"
+	i16.Parent = i14
 
-	--==================================================
-	-- ScrollingFrame base
-	--==================================================
+	local i17 = Instance.new("Frame")
+	i17.Name = "InfoCardTemplate"
+	i17.Parent = i16
+	SetSafe(i17, "Active", false)
+	SetSafe(i17, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i17, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i17, "BackgroundTransparency", 0.44999998807907104)
+	SetSafe(i17, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i17, "BorderSizePixel", 0)
+	SetSafe(i17, "ClipsDescendants", false)
+	SetSafe(i17, "LayoutOrder", 0)
+	SetSafe(i17, "Position", UDim2.new(0, 0, 0.17213115096092224, 0))
+	SetSafe(i17, "Rotation", 0)
+	SetSafe(i17, "Size", UDim2.new(0, 503, 0, 194))
+	SetSafe(i17, "Visible", true)
+	SetSafe(i17, "ZIndex", 1)
 
-	local ScrollingFrame = Instance.new("ScrollingFrame")
-	ScrollingFrame.Name = "ScrollingFrame"
-	ScrollingFrame.Position = UDim2Exact(
-		0.018726591020822525,
-		0,
-		0.026639344170689583,
-		0
-	)
-	ScrollingFrame.Size = UDim2Exact(0, 524, 0, 464)
-	ScrollingFrame.BackgroundColor3 = Color3Exact(1, 1, 1)
-	ScrollingFrame.BackgroundTransparency = 1
-	ScrollingFrame.BorderSizePixel = 0
-	ScrollingFrame.ScrollBarThickness = 6
-	ScrollingFrame.ScrollBarImageColor3 = Color3Exact(0, 0, 0)
-	ScrollingFrame.ScrollBarImageTransparency = 0
-	ScrollingFrame.CanvasSize = UDim2Exact(0, 0, 2, 0)
-	ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.None
-	ScrollingFrame.ScrollingDirection = Enum.ScrollingDirection.XY
-	ScrollingFrame.Visible = false
-	ScrollingFrame.ZIndex = 1
-	ScrollingFrame.Parent = BackGround
+	local i18 = Instance.new("UIStroke")
+	i18.Name = "UIStroke"
+	i18.Parent = i17
+	SetSafe(i18, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i18, "BorderStrokePosition", E("BorderStrokePosition", 2))
+	SetSafe(i18, "Color", Color3.new(0, 0, 0))
+	SetSafe(i18, "Enabled", true)
+	SetSafe(i18, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i18, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i18, "Thickness", 2.0)
+	SetSafe(i18, "Transparency", 0)
+	SetSafe(i18, "ZIndex", 1)
 
-	local ScrollLayout = Instance.new("UIListLayout")
-	ScrollLayout.Name = "UIListLayout"
-	ScrollLayout.FillDirection = Enum.FillDirection.Vertical
-	ScrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	ScrollLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	ScrollLayout.Padding = UDimExact(0, 6)
-	ScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	ScrollLayout.Parent = ScrollingFrame
+	local i19 = Instance.new("ImageLabel")
+	i19.Name = "Icon"
+	i19.Parent = i17
+	SetSafe(i19, "Active", false)
+	SetSafe(i19, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i19, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i19, "BackgroundTransparency", 0)
+	SetSafe(i19, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i19, "BorderSizePixel", 0)
+	SetSafe(i19, "ClipsDescendants", false)
+	SetSafe(i19, "Image", "rbxasset://textures/ui/GuiImagePlaceholder.png")
+	SetSafe(i19, "ImageColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i19, "ImageRectOffset", Vector2.new(0, 0))
+	SetSafe(i19, "ImageRectSize", Vector2.new(0, 0))
+	SetSafe(i19, "ImageTransparency", 0)
+	SetSafe(i19, "LayoutOrder", 0)
+	SetSafe(i19, "Position", UDim2.new(0.025844929739832878, 0, 0.31778204441070557, 0))
+	SetSafe(i19, "ResampleMode", E("ResamplerMode", 0))
+	SetSafe(i19, "Rotation", 0)
+	SetSafe(i19, "ScaleType", E("ScaleType", 0))
+	SetSafe(i19, "Visible", true)
+	SetSafe(i19, "ZIndex", 1)
 
-	--==================================================
-	-- Templates
-	--==================================================
+	local i20 = Instance.new("UICorner")
+	i20.Name = "UICorner"
+	i20.Parent = i19
+	SetSafe(i20, "BottomLeftRadius", UDim.new(0, 5))
+	SetSafe(i20, "BottomRightRadius", UDim.new(0, 5))
+	SetSafe(i20, "TopLeftRadius", UDim.new(0, 5))
+	SetSafe(i20, "TopRightRadius", UDim.new(0, 5))
 
-	local Templates = Instance.new("Folder")
-	Templates.Name = "Templates"
-	Templates.Parent = ScrollingFrame
+	local i21 = Instance.new("UIStroke")
+	i21.Name = "UIStroke"
+	i21.Parent = i19
+	SetSafe(i21, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i21, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i21, "Color", Color3.new(0.8313726186752319, 0, 1.0))
+	SetSafe(i21, "Enabled", true)
+	SetSafe(i21, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i21, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i21, "Thickness", 2.0)
+	SetSafe(i21, "Transparency", 0)
+	SetSafe(i21, "ZIndex", 1)
 
-	-- Container visual dos templates nao aparece.
-	local function PrepareTemplate(template)
-		if template:IsA("GuiObject") then
-			template.Visible = false
-		end
-	end
+	local i22 = Instance.new("TextLabel")
+	i22.Name = "TitleLabel"
+	i22.Parent = i17
+	SetSafe(i22, "Active", false)
+	SetSafe(i22, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i22, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i22, "BackgroundTransparency", 1.0)
+	SetSafe(i22, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i22, "BorderSizePixel", 0)
+	SetSafe(i22, "ClipsDescendants", false)
+	SetSafe(i22, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i22, "LayoutOrder", 0)
+	SetSafe(i22, "Position", UDim2.new(0.049701787531375885, 0, 0.03954795002937317, 0))
+	SetSafe(i22, "Rotation", 0)
+	SetSafe(i22, "Size", UDim2.new(0, 188, 0, 38))
+	SetSafe(i22, "Text", "Egg Predictor")
+	SetSafe(i22, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i22, "TextScaled", true)
+	SetSafe(i22, "TextSize", 14.0)
+	SetSafe(i22, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i22, "TextStrokeTransparency", 1.0)
+	SetSafe(i22, "TextTransparency", 0)
+	SetSafe(i22, "TextWrapped", true)
+	SetSafe(i22, "TextXAlignment", 2)
+	SetSafe(i22, "TextYAlignment", 1)
+	SetSafe(i22, "Visible", true)
+	SetSafe(i22, "ZIndex", 1)
 
-	--==================================================
-	-- InfoCardTemplate
-	--==================================================
+	local i23 = Instance.new("Frame")
+	i23.Name = "ListInformations"
+	i23.Parent = i17
+	SetSafe(i23, "Active", false)
+	SetSafe(i23, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i23, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i23, "BackgroundTransparency", 1.0)
+	SetSafe(i23, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i23, "BorderSizePixel", 0)
+	SetSafe(i23, "ClipsDescendants", false)
+	SetSafe(i23, "LayoutOrder", 0)
+	SetSafe(i23, "Position", UDim2.new(0.2425447255373001, 0, 0.23567593097686768, 0))
+	SetSafe(i23, "Rotation", 0)
+	SetSafe(i23, "Size", UDim2.new(0, 121, 0, 129))
+	SetSafe(i23, "Visible", true)
+	SetSafe(i23, "ZIndex", 1)
 
-	local InfoCardTemplate = Instance.new("Frame")
-	InfoCardTemplate.Name = "InfoCardTemplate"
-	InfoCardTemplate.Position = UDim2Exact(
-		0,
-		0,
-		0.17213115096092224,
-		0
-	)
-	InfoCardTemplate.Size = UDim2Exact(0, 503, 0, 194)
-	InfoCardTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	InfoCardTemplate.BackgroundTransparency = 0.45
-	InfoCardTemplate.BorderSizePixel = 0
-	InfoCardTemplate.Visible = false
-	InfoCardTemplate.Parent = Templates
+	local i24 = Instance.new("UIListLayout")
+	i24.Name = "UIListLayout"
+	i24.Parent = i23
+	SetSafe(i24, "FillDirection", E("FillDirection", 1))
+	SetSafe(i24, "HorizontalAlignment", E("HorizontalAlignment", 1))
+	SetSafe(i24, "Padding", UDim.new(0, 6))
+	SetSafe(i24, "SortOrder", E("SortOrder", 2))
+	SetSafe(i24, "VerticalAlignment", E("VerticalAlignment", 1))
+	SetSafe(i24, "Wraps", false)
 
-	CriarStroke(
-		InfoCardTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i25 = Instance.new("TextLabel")
+	i25.Name = "InformationTextTemplate"
+	i25.Parent = i23
+	SetSafe(i25, "Active", false)
+	SetSafe(i25, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i25, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i25, "BackgroundTransparency", 1.0)
+	SetSafe(i25, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i25, "BorderSizePixel", 0)
+	SetSafe(i25, "ClipsDescendants", false)
+	SetSafe(i25, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i25, "LayoutOrder", 0)
+	SetSafe(i25, "Position", UDim2.new(0.22465208172798157, 0, 0.21468926966190338, 0))
+	SetSafe(i25, "Rotation", 0)
+	SetSafe(i25, "Size", UDim2.new(0, 118, 0, 25))
+	SetSafe(i25, "Text", "3.03x")
+	SetSafe(i25, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i25, "TextScaled", false)
+	SetSafe(i25, "TextSize", 20.0)
+	SetSafe(i25, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i25, "TextStrokeTransparency", 1.0)
+	SetSafe(i25, "TextTransparency", 0)
+	SetSafe(i25, "TextWrapped", true)
+	SetSafe(i25, "TextXAlignment", 2)
+	SetSafe(i25, "TextYAlignment", 1)
+	SetSafe(i25, "Visible", true)
+	SetSafe(i25, "ZIndex", 1)
 
-	local Icon = Instance.new("ImageLabel")
-	Icon.Name = "Icon"
-	Icon.Position = UDim2Exact(
-		0.025844929739832878,
-		0,
-		0.31778204441070557,
-		0
-	)
-	Icon.Size = UDim2Exact(0, 100, 0, 100)
-	Icon.BackgroundColor3 = Color3Exact(1, 1, 1)
-	Icon.BackgroundTransparency = 0
-	Icon.BorderSizePixel = 0
-	Icon.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
-	Icon.ImageColor3 = Color3Exact(1, 1, 1)
-	Icon.ImageTransparency = 0
-	Icon.ScaleType = Enum.ScaleType.Stretch
-	Icon.Visible = true
-	Icon.ZIndex = 1
-	Icon.Parent = InfoCardTemplate
+	local i26 = Instance.new("Frame")
+	i26.Name = "ToggleTemplate"
+	i26.Parent = i16
+	SetSafe(i26, "Active", false)
+	SetSafe(i26, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i26, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i26, "BackgroundTransparency", 0.44999998807907104)
+	SetSafe(i26, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i26, "BorderSizePixel", 0)
+	SetSafe(i26, "ClipsDescendants", false)
+	SetSafe(i26, "LayoutOrder", 0)
+	SetSafe(i26, "Position", UDim2.new(0.010414415039122105, 0, 0.032087452709674835, 0))
+	SetSafe(i26, "Rotation", 0)
+	SetSafe(i26, "Size", UDim2.new(0, 503, 0, 50))
+	SetSafe(i26, "Visible", true)
+	SetSafe(i26, "ZIndex", 1)
 
-	CriarCorner(Icon, 5)
-	CriarStroke(
-		Icon,
-		"UIStroke",
-		2,
-		Color3Exact(0.8313726186752319, 0, 1),
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i27 = Instance.new("UIStroke")
+	i27.Name = "UIStroke"
+	i27.Parent = i26
+	SetSafe(i27, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i27, "BorderStrokePosition", E("BorderStrokePosition", 2))
+	SetSafe(i27, "Color", Color3.new(0, 0, 0))
+	SetSafe(i27, "Enabled", true)
+	SetSafe(i27, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i27, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i27, "Thickness", 2.0)
+	SetSafe(i27, "Transparency", 0)
+	SetSafe(i27, "ZIndex", 1)
 
-	local InfoTitle = Instance.new("TextLabel")
-	InfoTitle.Name = "TitleLabel"
-	InfoTitle.Position = UDim2Exact(
-		0.049701787531375885,
-		0,
-		0.03954795002937317,
-		0
-	)
-	InfoTitle.Size = UDim2Exact(0, 188, 0, 38)
-	InfoTitle.BackgroundTransparency = 1
-	InfoTitle.Text = "Egg Predictor"
-	InfoTitle.TextColor3 = Color3Exact(1, 1, 1)
-	InfoTitle.TextSize = 14
-	InfoTitle.TextScaled = true
-	InfoTitle.TextWrapped = true
-	InfoTitle.TextXAlignment = Enum.TextXAlignment.Right
-	InfoTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		InfoTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	InfoTitle.Parent = InfoCardTemplate
+	local i28 = Instance.new("TextLabel")
+	i28.Name = "TitleLabel"
+	i28.Parent = i26
+	SetSafe(i28, "Active", false)
+	SetSafe(i28, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i28, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i28, "BackgroundTransparency", 1.0)
+	SetSafe(i28, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i28, "BorderSizePixel", 0)
+	SetSafe(i28, "ClipsDescendants", false)
+	SetSafe(i28, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i28, "LayoutOrder", 0)
+	SetSafe(i28, "Position", UDim2.new(0.013916500844061375, 0, 0, 0))
+	SetSafe(i28, "Rotation", 0)
+	SetSafe(i28, "Size", UDim2.new(0, 200, 0, 50))
+	SetSafe(i28, "Text", "Auto Steal")
+	SetSafe(i28, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i28, "TextScaled", true)
+	SetSafe(i28, "TextSize", 14.0)
+	SetSafe(i28, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i28, "TextStrokeTransparency", 1.0)
+	SetSafe(i28, "TextTransparency", 0)
+	SetSafe(i28, "TextWrapped", true)
+	SetSafe(i28, "TextXAlignment", 2)
+	SetSafe(i28, "TextYAlignment", 1)
+	SetSafe(i28, "Visible", true)
+	SetSafe(i28, "ZIndex", 1)
 
-	local ListInformations = Instance.new("Frame")
-	ListInformations.Name = "ListInformations"
-	ListInformations.Position = UDim2Exact(
-		0.2425447255373001,
-		0,
-		0.23567593097686768,
-		0
-	)
-	ListInformations.Size = UDim2Exact(0, 121, 0, 129)
-	ListInformations.BackgroundTransparency = 1
-	ListInformations.Parent = InfoCardTemplate
+	local i29 = Instance.new("TextButton")
+	i29.Name = "ToggleButton"
+	i29.Parent = i26
+	SetSafe(i29, "Active", false)
+	SetSafe(i29, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i29, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i29, "BackgroundTransparency", 0.4000000059604645)
+	SetSafe(i29, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i29, "BorderSizePixel", 0)
+	SetSafe(i29, "ClipsDescendants", false)
+	SetSafe(i29, "FontFace", Font.new("rbxasset://fonts/families/LegacyArial.json", E("FontWeight", 400), E("FontStyle", 0)))
+	SetSafe(i29, "LayoutOrder", 0)
+	SetSafe(i29, "Position", UDim2.new(0.8409543037414551, 0, 0.16279174387454987, 0))
+	SetSafe(i29, "Rotation", 0)
+	SetSafe(i29, "Size", UDim2.new(0, 75, 0, 35))
+	SetSafe(i29, "Text", "")
+	SetSafe(i29, "TextColor3", Color3.new(0.10588236153125763, 0.16470588743686676, 0.20784315466880798))
+	SetSafe(i29, "TextScaled", false)
+	SetSafe(i29, "TextSize", 8.0)
+	SetSafe(i29, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i29, "TextStrokeTransparency", 1.0)
+	SetSafe(i29, "TextTransparency", 0)
+	SetSafe(i29, "TextWrapped", false)
+	SetSafe(i29, "TextXAlignment", 2)
+	SetSafe(i29, "TextYAlignment", 1)
+	SetSafe(i29, "Visible", true)
+	SetSafe(i29, "ZIndex", 1)
 
-	local InfoLayout = Instance.new("UIListLayout")
-	InfoLayout.Name = "UIListLayout"
-	InfoLayout.FillDirection = Enum.FillDirection.Vertical
-	InfoLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	InfoLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	InfoLayout.Padding = UDimExact(0, 6)
-	InfoLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	InfoLayout.Parent = ListInformations
+	local i30 = Instance.new("Frame")
+	i30.Name = "ButtonLine"
+	i30.Parent = i29
+	SetSafe(i30, "Active", false)
+	SetSafe(i30, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i30, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i30, "BackgroundTransparency", 0)
+	SetSafe(i30, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i30, "BorderSizePixel", 0)
+	SetSafe(i30, "ClipsDescendants", false)
+	SetSafe(i30, "LayoutOrder", 0)
+	SetSafe(i30, "Position", UDim2.new(0.09700000286102295, 0, 0.1899999976158142, 0))
+	SetSafe(i30, "Rotation", 0)
+	SetSafe(i30, "Size", UDim2.new(0, 20, 0, 21))
+	SetSafe(i30, "Visible", true)
+	SetSafe(i30, "ZIndex", 1)
 
-	local InformationTextTemplate = Instance.new("TextLabel")
-	InformationTextTemplate.Name = "InformationTextTemplate"
-	InformationTextTemplate.Position = UDim2Exact(
-		0.22465208172798157,
-		0,
-		0.21468926966190338,
-		0
-	)
-	InformationTextTemplate.Size = UDim2Exact(0, 118, 0, 25)
-	InformationTextTemplate.BackgroundTransparency = 1
-	InformationTextTemplate.Text = "3.03x"
-	InformationTextTemplate.TextColor3 = Color3Exact(1, 1, 1)
-	InformationTextTemplate.TextSize = 20
-	InformationTextTemplate.TextScaled = false
-	InformationTextTemplate.TextWrapped = true
-	InformationTextTemplate.TextXAlignment = Enum.TextXAlignment.Right
-	InformationTextTemplate.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		InformationTextTemplate,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	InformationTextTemplate.Parent = ListInformations
+	local i31 = Instance.new("Frame")
+	i31.Name = "DropdownTemplate"
+	i31.Parent = i16
+	SetSafe(i31, "Active", false)
+	SetSafe(i31, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i31, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i31, "BackgroundTransparency", 0.44999998807907104)
+	SetSafe(i31, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i31, "BorderSizePixel", 0)
+	SetSafe(i31, "ClipsDescendants", false)
+	SetSafe(i31, "LayoutOrder", 0)
+	SetSafe(i31, "Position", UDim2.new(0.010414415039122105, 0, 0.032087452709674835, 0))
+	SetSafe(i31, "Rotation", 0)
+	SetSafe(i31, "Size", UDim2.new(0, 503, 0, 50))
+	SetSafe(i31, "Visible", true)
+	SetSafe(i31, "ZIndex", 1)
 
-	--==================================================
-	-- ToggleTemplate
-	--==================================================
+	local i32 = Instance.new("UIStroke")
+	i32.Name = "UIStroke"
+	i32.Parent = i31
+	SetSafe(i32, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i32, "BorderStrokePosition", E("BorderStrokePosition", 2))
+	SetSafe(i32, "Color", Color3.new(0, 0, 0))
+	SetSafe(i32, "Enabled", true)
+	SetSafe(i32, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i32, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i32, "Thickness", 2.0)
+	SetSafe(i32, "Transparency", 0)
+	SetSafe(i32, "ZIndex", 1)
 
-	local ToggleTemplate = Instance.new("Frame")
-	ToggleTemplate.Name = "ToggleTemplate"
-	ToggleTemplate.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	ToggleTemplate.Size = UDim2Exact(0, 503, 0, 50)
-	ToggleTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	ToggleTemplate.BackgroundTransparency = 0.45
-	ToggleTemplate.BorderSizePixel = 0
-	ToggleTemplate.Visible = false
-	ToggleTemplate.Parent = Templates
+	local i33 = Instance.new("TextLabel")
+	i33.Name = "TitleLabel"
+	i33.Parent = i31
+	SetSafe(i33, "Active", false)
+	SetSafe(i33, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i33, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i33, "BackgroundTransparency", 1.0)
+	SetSafe(i33, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i33, "BorderSizePixel", 0)
+	SetSafe(i33, "ClipsDescendants", false)
+	SetSafe(i33, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i33, "LayoutOrder", 0)
+	SetSafe(i33, "Position", UDim2.new(0.025844929739832878, 0, 0, 0))
+	SetSafe(i33, "Rotation", 0)
+	SetSafe(i33, "Size", UDim2.new(0, 200, 0, 50))
+	SetSafe(i33, "Text", "Target Areas")
+	SetSafe(i33, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i33, "TextScaled", true)
+	SetSafe(i33, "TextSize", 14.0)
+	SetSafe(i33, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i33, "TextStrokeTransparency", 1.0)
+	SetSafe(i33, "TextTransparency", 0)
+	SetSafe(i33, "TextWrapped", true)
+	SetSafe(i33, "TextXAlignment", 2)
+	SetSafe(i33, "TextYAlignment", 1)
+	SetSafe(i33, "Visible", true)
+	SetSafe(i33, "ZIndex", 1)
 
-	CriarStroke(
-		ToggleTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i34 = Instance.new("TextButton")
+	i34.Name = "Frame"
+	i34.Parent = i31
+	SetSafe(i34, "Active", false)
+	SetSafe(i34, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i34, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i34, "BackgroundTransparency", 0.4000000059604645)
+	SetSafe(i34, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i34, "BorderSizePixel", 0)
+	SetSafe(i34, "ClipsDescendants", false)
+	SetSafe(i34, "FontFace", Font.new("rbxasset://fonts/families/LegacyArial.json", E("FontWeight", 400), E("FontStyle", 0)))
+	SetSafe(i34, "LayoutOrder", 0)
+	SetSafe(i34, "Position", UDim2.new(0.6421471238136292, 0, 0.16279174387454987, 0))
+	SetSafe(i34, "Rotation", 0)
+	SetSafe(i34, "Size", UDim2.new(0, 175, 0, 35))
+	SetSafe(i34, "Text", "")
+	SetSafe(i34, "TextColor3", Color3.new(0.10588236153125763, 0.16470588743686676, 0.20784315466880798))
+	SetSafe(i34, "TextScaled", false)
+	SetSafe(i34, "TextSize", 8.0)
+	SetSafe(i34, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i34, "TextStrokeTransparency", 1.0)
+	SetSafe(i34, "TextTransparency", 0)
+	SetSafe(i34, "TextWrapped", false)
+	SetSafe(i34, "TextXAlignment", 2)
+	SetSafe(i34, "TextYAlignment", 1)
+	SetSafe(i34, "Visible", true)
+	SetSafe(i34, "ZIndex", 1)
 
-	local ToggleTitle = Instance.new("TextLabel")
-	ToggleTitle.Name = "TitleLabel"
-	ToggleTitle.Position = UDim2Exact(
-		0.013916500844061375,
-		0,
-		0,
-		0
-	)
-	ToggleTitle.Size = UDim2Exact(0, 200, 0, 50)
-	ToggleTitle.BackgroundTransparency = 1
-	ToggleTitle.Text = "Auto Steal"
-	ToggleTitle.TextColor3 = Color3Exact(1, 1, 1)
-	ToggleTitle.TextSize = 14
-	ToggleTitle.TextScaled = true
-	ToggleTitle.TextWrapped = true
-	ToggleTitle.TextXAlignment = Enum.TextXAlignment.Right
-	ToggleTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		ToggleTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	ToggleTitle.Parent = ToggleTemplate
+	local i35 = Instance.new("TextLabel")
+	i35.Name = "TextLabel"
+	i35.Parent = i34
+	SetSafe(i35, "Active", false)
+	SetSafe(i35, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i35, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i35, "BackgroundTransparency", 1.0)
+	SetSafe(i35, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i35, "BorderSizePixel", 0)
+	SetSafe(i35, "ClipsDescendants", false)
+	SetSafe(i35, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i35, "LayoutOrder", 0)
+	SetSafe(i35, "Position", UDim2.new(0.8278145790100098, 0, 0.2571428716182709, 0))
+	SetSafe(i35, "Rotation", 180.0)
+	SetSafe(i35, "Size", UDim2.new(0, 19, 0, 16))
+	SetSafe(i35, "Text", "^")
+	SetSafe(i35, "TextColor3", Color3.new(0, 0.7411764860153198, 0.05098039656877518))
+	SetSafe(i35, "TextScaled", false)
+	SetSafe(i35, "TextSize", 30.0)
+	SetSafe(i35, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i35, "TextStrokeTransparency", 1.0)
+	SetSafe(i35, "TextTransparency", 0)
+	SetSafe(i35, "TextWrapped", true)
+	SetSafe(i35, "TextXAlignment", 2)
+	SetSafe(i35, "TextYAlignment", 1)
+	SetSafe(i35, "Visible", true)
+	SetSafe(i35, "ZIndex", 1)
 
-	local ToggleButton = Instance.new("TextButton")
-	ToggleButton.Name = "ToggleButton"
-	ToggleButton.Position = UDim2Exact(
-		0.8409543037414551,
-		0,
-		0.16279174387454987,
-		0
-	)
-	ToggleButton.Size = UDim2Exact(0, 75, 0, 35)
-	ToggleButton.BackgroundColor3 = Color3Exact(0, 0, 0)
-	ToggleButton.BackgroundTransparency = 0.4
-	ToggleButton.BorderSizePixel = 0
-	ToggleButton.Text = ""
-	ToggleButton.TextColor3 = Color3Exact(
-		0.10588236153125763,
-		0.16470588743686676,
-		0.20784315466880798
-	)
-	ToggleButton.TextSize = 8
-	ToggleButton.AutoButtonColor = true
-	ToggleButton.ZIndex = 1
-	ToggleButton.Parent = ToggleTemplate
+	local i36 = Instance.new("TextLabel")
+	i36.Name = "TitleLabel"
+	i36.Parent = i34
+	SetSafe(i36, "Active", false)
+	SetSafe(i36, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i36, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i36, "BackgroundTransparency", 1.0)
+	SetSafe(i36, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i36, "BorderSizePixel", 0)
+	SetSafe(i36, "ClipsDescendants", false)
+	SetSafe(i36, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i36, "LayoutOrder", 0)
+	SetSafe(i36, "Position", UDim2.new(0.046091657131910324, 0, 0, 0))
+	SetSafe(i36, "Rotation", 0)
+	SetSafe(i36, "Size", UDim2.new(0, 133, 0, 35))
+	SetSafe(i36, "Text", "Selected 12")
+	SetSafe(i36, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i36, "TextScaled", false)
+	SetSafe(i36, "TextSize", 20.0)
+	SetSafe(i36, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i36, "TextStrokeTransparency", 1.0)
+	SetSafe(i36, "TextTransparency", 0)
+	SetSafe(i36, "TextWrapped", true)
+	SetSafe(i36, "TextXAlignment", 2)
+	SetSafe(i36, "TextYAlignment", 1)
+	SetSafe(i36, "Visible", true)
+	SetSafe(i36, "ZIndex", 1)
 
-	CriarStroke(
-		ToggleButton,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Inner
-	)
+	local i37 = Instance.new("Frame")
+	i37.Name = "SliderTemplate"
+	i37.Parent = i16
+	SetSafe(i37, "Active", false)
+	SetSafe(i37, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i37, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i37, "BackgroundTransparency", 0.44999998807907104)
+	SetSafe(i37, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i37, "BorderSizePixel", 0)
+	SetSafe(i37, "ClipsDescendants", false)
+	SetSafe(i37, "LayoutOrder", 0)
+	SetSafe(i37, "Position", UDim2.new(0.010414415039122105, 0, 0.032087452709674835, 0))
+	SetSafe(i37, "Rotation", 0)
+	SetSafe(i37, "Size", UDim2.new(0, 503, 0, 50))
+	SetSafe(i37, "Visible", true)
+	SetSafe(i37, "ZIndex", 1)
 
-	local ButtonLine = Instance.new("Frame")
-	ButtonLine.Name = "ButtonLine"
-	ButtonLine.Position = UDim2Exact(
-		0.097,
-		0,
-		0.19,
-		0
-	)
-	ButtonLine.Size = UDim2Exact(0, 20, 0, 21)
-	ButtonLine.BackgroundColor3 = Color3Exact(1, 1, 1)
-	ButtonLine.BorderSizePixel = 0
-	ButtonLine.Parent = ToggleButton
+	local i38 = Instance.new("UIStroke")
+	i38.Name = "UIStroke"
+	i38.Parent = i37
+	SetSafe(i38, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i38, "BorderStrokePosition", E("BorderStrokePosition", 2))
+	SetSafe(i38, "Color", Color3.new(0, 0, 0))
+	SetSafe(i38, "Enabled", true)
+	SetSafe(i38, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i38, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i38, "Thickness", 2.0)
+	SetSafe(i38, "Transparency", 0)
+	SetSafe(i38, "ZIndex", 1)
 
-	--==================================================
-	-- DropdownTemplate
-	--==================================================
+	local i39 = Instance.new("TextLabel")
+	i39.Name = "TitleLabel"
+	i39.Parent = i37
+	SetSafe(i39, "Active", false)
+	SetSafe(i39, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i39, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i39, "BackgroundTransparency", 1.0)
+	SetSafe(i39, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i39, "BorderSizePixel", 0)
+	SetSafe(i39, "ClipsDescendants", false)
+	SetSafe(i39, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i39, "LayoutOrder", 0)
+	SetSafe(i39, "Position", UDim2.new(0.025844929739832878, 0, 0, 0))
+	SetSafe(i39, "Rotation", 0)
+	SetSafe(i39, "Size", UDim2.new(0, 200, 0, 50))
+	SetSafe(i39, "Text", "Min Value To Steal")
+	SetSafe(i39, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i39, "TextScaled", true)
+	SetSafe(i39, "TextSize", 14.0)
+	SetSafe(i39, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i39, "TextStrokeTransparency", 1.0)
+	SetSafe(i39, "TextTransparency", 0)
+	SetSafe(i39, "TextWrapped", true)
+	SetSafe(i39, "TextXAlignment", 2)
+	SetSafe(i39, "TextYAlignment", 1)
+	SetSafe(i39, "Visible", true)
+	SetSafe(i39, "ZIndex", 1)
 
-	local DropdownTemplate = Instance.new("Frame")
-	DropdownTemplate.Name = "DropdownTemplate"
-	DropdownTemplate.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	DropdownTemplate.Size = UDim2Exact(0, 503, 0, 50)
-	DropdownTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	DropdownTemplate.BackgroundTransparency = 0.45
-	DropdownTemplate.BorderSizePixel = 0
-	DropdownTemplate.Visible = false
-	DropdownTemplate.Parent = Templates
+	local i40 = Instance.new("Frame")
+	i40.Name = "SliderTrack"
+	i40.Parent = i37
+	SetSafe(i40, "Active", false)
+	SetSafe(i40, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i40, "BackgroundColor3", Color3.new(0, 0, 0))
+	SetSafe(i40, "BackgroundTransparency", 0.4000000059604645)
+	SetSafe(i40, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i40, "BorderSizePixel", 0)
+	SetSafe(i40, "ClipsDescendants", false)
+	SetSafe(i40, "LayoutOrder", 0)
+	SetSafe(i40, "Position", UDim2.new(0.570576548576355, 0, 0.2800000011920929, 0))
+	SetSafe(i40, "Rotation", 0)
+	SetSafe(i40, "Size", UDim2.new(0, 199, 0, 22))
+	SetSafe(i40, "Visible", true)
+	SetSafe(i40, "ZIndex", 1)
 
-	CriarStroke(
-		DropdownTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i41 = Instance.new("TextButton")
+	i41.Name = "FillButton"
+	i41.Parent = i40
+	SetSafe(i41, "Active", false)
+	SetSafe(i41, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i41, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i41, "BackgroundTransparency", 0)
+	SetSafe(i41, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i41, "BorderSizePixel", 0)
+	SetSafe(i41, "ClipsDescendants", false)
+	SetSafe(i41, "FontFace", Font.new("rbxasset://fonts/families/LegacyArial.json", E("FontWeight", 400), E("FontStyle", 0)))
+	SetSafe(i41, "LayoutOrder", 0)
+	SetSafe(i41, "Position", UDim2.new(0.5879999995231628, 0, -0.0949999988079071, 0))
+	SetSafe(i41, "Rotation", 0)
+	SetSafe(i41, "Size", UDim2.new(0, 23, 0, 28))
+	SetSafe(i41, "Text", "")
+	SetSafe(i41, "TextColor3", Color3.new(0.10588236153125763, 0.16470588743686676, 0.20784315466880798))
+	SetSafe(i41, "TextScaled", false)
+	SetSafe(i41, "TextSize", 8.0)
+	SetSafe(i41, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i41, "TextStrokeTransparency", 1.0)
+	SetSafe(i41, "TextTransparency", 0)
+	SetSafe(i41, "TextWrapped", false)
+	SetSafe(i41, "TextXAlignment", 2)
+	SetSafe(i41, "TextYAlignment", 1)
+	SetSafe(i41, "Visible", true)
+	SetSafe(i41, "ZIndex", 2)
 
-	local DropdownTitle = Instance.new("TextLabel")
-	DropdownTitle.Name = "TitleLabel"
-	DropdownTitle.Position = UDim2Exact(
-		0.025844929739832878,
-		0,
-		0,
-		0
-	)
-	DropdownTitle.Size = UDim2Exact(0, 200, 0, 50)
-	DropdownTitle.BackgroundTransparency = 1
-	DropdownTitle.Text = "Target Areas"
-	DropdownTitle.TextColor3 = Color3Exact(1, 1, 1)
-	DropdownTitle.TextSize = 14
-	DropdownTitle.TextScaled = true
-	DropdownTitle.TextWrapped = true
-	DropdownTitle.TextXAlignment = Enum.TextXAlignment.Right
-	DropdownTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		DropdownTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	DropdownTitle.Parent = DropdownTemplate
+	local i42 = Instance.new("Frame")
+	i42.Name = "Progress"
+	i42.Parent = i40
+	SetSafe(i42, "Active", false)
+	SetSafe(i42, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i42, "BackgroundColor3", Color3.new(0, 1.0, 0.06666667014360428))
+	SetSafe(i42, "BackgroundTransparency", 0)
+	SetSafe(i42, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i42, "BorderSizePixel", 0)
+	SetSafe(i42, "ClipsDescendants", false)
+	SetSafe(i42, "LayoutOrder", 0)
+	SetSafe(i42, "Position", UDim2.new(0.0011473995400592685, 0, 0.052727438509464264, 0))
+	SetSafe(i42, "Rotation", 0)
+	SetSafe(i42, "Size", UDim2.new(0, 128, 0, 22))
+	SetSafe(i42, "Visible", true)
+	SetSafe(i42, "ZIndex", 1)
 
-	local DropdownButton = Instance.new("TextButton")
-	DropdownButton.Name = "Frame"
-	DropdownButton.Position = UDim2Exact(
-		0.6421471238136292,
-		0,
-		0.16279174387454987,
-		0
-	)
-	DropdownButton.Size = UDim2Exact(0, 175, 0, 35)
-	DropdownButton.BackgroundColor3 = Color3Exact(0, 0, 0)
-	DropdownButton.BackgroundTransparency = 0.4
-	DropdownButton.BorderSizePixel = 0
-	DropdownButton.Text = ""
-	DropdownButton.TextSize = 8
-	DropdownButton.TextXAlignment = Enum.TextXAlignment.Right
-	DropdownButton.TextYAlignment = Enum.TextYAlignment.Center
-	DropdownButton.Parent = DropdownTemplate
+	local i43 = Instance.new("TextButton")
+	i43.Name = "Close"
+	i43.Parent = i1
+	SetSafe(i43, "Active", true)
+	SetSafe(i43, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i43, "BackgroundColor3", Color3.new(1.0, 0.27450981736183167, 0.2862745225429535))
+	SetSafe(i43, "BackgroundTransparency", 0)
+	SetSafe(i43, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i43, "BorderSizePixel", 0)
+	SetSafe(i43, "ClipsDescendants", false)
+	SetSafe(i43, "FontFace", Font.new("rbxasset://fonts/families/GothamSSm.json", E("FontWeight", 900), E("FontStyle", 0)))
+	SetSafe(i43, "LayoutOrder", 0)
+	SetSafe(i43, "Position", UDim2.new(0.9155639410018921, 0, -0.10804338753223419, 0))
+	SetSafe(i43, "Rotation", 0)
+	SetSafe(i43, "Size", UDim2.new(0.07383592426776886, 0, 0.06910896301269531, 0))
+	SetSafe(i43, "Text", "X")
+	SetSafe(i43, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i43, "TextScaled", true)
+	SetSafe(i43, "TextSize", 14.0)
+	SetSafe(i43, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i43, "TextStrokeTransparency", 1.0)
+	SetSafe(i43, "TextTransparency", 0)
+	SetSafe(i43, "TextWrapped", true)
+	SetSafe(i43, "TextXAlignment", 2)
+	SetSafe(i43, "TextYAlignment", 1)
+	SetSafe(i43, "Visible", true)
+	SetSafe(i43, "ZIndex", 1)
 
-	CriarStroke(
-		DropdownButton,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Inner
-	)
+	local i44 = Instance.new("UIStroke")
+	i44.Name = "UIStroke"
+	i44.Parent = i43
+	SetSafe(i44, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i44, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i44, "Color", Color3.new(0, 0, 0))
+	SetSafe(i44, "Enabled", true)
+	SetSafe(i44, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i44, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i44, "Thickness", 2.0999999046325684)
+	SetSafe(i44, "Transparency", 0)
+	SetSafe(i44, "ZIndex", 1)
 
-	local DropdownText = Instance.new("TextLabel")
-	DropdownText.Name = "TextLabel"
-	DropdownText.Position = UDim2Exact(
-		0.8278145790100098,
-		0,
-		0.2571428716182709,
-		0
-	)
-	DropdownText.Size = UDim2Exact(0, 19, 0, 16)
-	DropdownText.BackgroundTransparency = 1
-	DropdownText.Text = "^"
-	DropdownText.TextColor3 = Color3Exact(
-		0,
-		0.7411764860153198,
-		0.05098039656877518
-	)
-	DropdownText.TextSize = 30
-	DropdownText.TextScaled = false
-	DropdownText.TextWrapped = true
-	DropdownText.TextXAlignment = Enum.TextXAlignment.Right
-	DropdownText.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		DropdownText,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	DropdownText.Parent = DropdownButton
+	local i45 = Instance.new("UIStroke")
+	i45.Name = "UIStroke"
+	i45.Parent = i43
+	SetSafe(i45, "ApplyStrokeMode", E("ApplyStrokeMode", 1))
+	SetSafe(i45, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i45, "Color", Color3.new(0, 0, 0))
+	SetSafe(i45, "Enabled", true)
+	SetSafe(i45, "LineJoinMode", E("LineJoinMode", 2))
+	SetSafe(i45, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i45, "Thickness", 3.5)
+	SetSafe(i45, "Transparency", 0)
+	SetSafe(i45, "ZIndex", 1)
 
-	local SelectedLabel = Instance.new("TextLabel")
-	SelectedLabel.Name = "TitleLabel"
-	SelectedLabel.Position = UDim2Exact(
-		0.046091657131910324,
-		0,
-		0,
-		0
-	)
-	SelectedLabel.Size = UDim2Exact(0, 133, 0, 35)
-	SelectedLabel.BackgroundTransparency = 1
-	SelectedLabel.Text = "Selected 12"
-	SelectedLabel.TextColor3 = Color3Exact(1, 1, 1)
-	SelectedLabel.TextSize = 20
-	SelectedLabel.TextScaled = false
-	SelectedLabel.TextWrapped = true
-	SelectedLabel.TextXAlignment = Enum.TextXAlignment.Right
-	SelectedLabel.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		SelectedLabel,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	SelectedLabel.Parent = DropdownButton
+	local i46 = Instance.new("UIAspectRatioConstraint")
+	i46.Name = "UIAspectRatioConstraint"
+	i46.Parent = i43
+	SetSafe(i46, "AspectRatio", 1.0327868461608887)
+	SetSafe(i46, "AspectType", E("AspectType", 0))
+	SetSafe(i46, "DominantAxis", E("DominantAxis", 0))
 
-	--==================================================
-	-- SliderTemplate
-	--==================================================
+	local i47 = Instance.new("ImageLabel")
+	i47.Name = "ImageLabel"
+	i47.Parent = i43
+	SetSafe(i47, "Active", false)
+	SetSafe(i47, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i47, "BackgroundColor3", Color3.new(0.4941176772117615, 0.8823530077934265, 1.0))
+	SetSafe(i47, "BackgroundTransparency", 1.0)
+	SetSafe(i47, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i47, "BorderSizePixel", 0)
+	SetSafe(i47, "ClipsDescendants", false)
+	SetSafe(i47, "Image", "rbxassetid://8398274754")
+	SetSafe(i47, "ImageColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i47, "ImageRectOffset", Vector2.new(0, 0))
+	SetSafe(i47, "ImageRectSize", Vector2.new(0, 0))
+	SetSafe(i47, "ImageTransparency", 0.6100000143051147)
+	SetSafe(i47, "LayoutOrder", 0)
+	SetSafe(i47, "Position", UDim2.new(-0.020998133346438408, 0, -0.00829874724149704, 0))
+	SetSafe(i47, "ResampleMode", E("ResamplerMode", 0))
+	SetSafe(i47, "Rotation", 0)
+	SetSafe(i47, "ScaleType", E("ScaleType", 4))
+	SetSafe(i47, "Visible", true)
+	SetSafe(i47, "ZIndex", 1)
 
-	local SliderTemplate = Instance.new("Frame")
-	SliderTemplate.Name = "SliderTemplate"
-	SliderTemplate.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	SliderTemplate.Size = UDim2Exact(0, 503, 0, 50)
-	SliderTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	SliderTemplate.BackgroundTransparency = 0.45
-	SliderTemplate.BorderSizePixel = 0
-	SliderTemplate.Visible = false
-	SliderTemplate.Parent = Templates
+	local i48 = Instance.new("Frame")
+	i48.Name = "TabButtonsFrame"
+	i48.Parent = i1
+	SetSafe(i48, "Active", false)
+	SetSafe(i48, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i48, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i48, "BackgroundTransparency", 1.0)
+	SetSafe(i48, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i48, "BorderSizePixel", 0)
+	SetSafe(i48, "ClipsDescendants", false)
+	SetSafe(i48, "LayoutOrder", 0)
+	SetSafe(i48, "Position", UDim2.new(1.0430711507797241, 0, 0.026639344170689583, 0))
+	SetSafe(i48, "Rotation", 0)
+	SetSafe(i48, "Size", UDim2.new(0, 169, 0, 461))
+	SetSafe(i48, "Visible", true)
+	SetSafe(i48, "ZIndex", 1)
 
-	CriarStroke(
-		SliderTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local i49 = Instance.new("UIListLayout")
+	i49.Name = "UIListLayout"
+	i49.Parent = i48
+	SetSafe(i49, "FillDirection", E("FillDirection", 0))
+	SetSafe(i49, "HorizontalAlignment", E("HorizontalAlignment", 0))
+	SetSafe(i49, "Padding", UDim.new(0, 75))
+	SetSafe(i49, "SortOrder", E("SortOrder", 2))
+	SetSafe(i49, "VerticalAlignment", E("VerticalAlignment", 1))
+	SetSafe(i49, "Wraps", true)
 
-	local SliderTitle = Instance.new("TextLabel")
-	SliderTitle.Name = "TitleLabel"
-	SliderTitle.Position = UDim2Exact(
-		0.025844929739832878,
-		0,
-		0,
-		0
-	)
-	SliderTitle.Size = UDim2Exact(0, 200, 0, 50)
-	SliderTitle.BackgroundTransparency = 1
-	SliderTitle.Text = "Min Value To Steal"
-	SliderTitle.TextColor3 = Color3Exact(1, 1, 1)
-	SliderTitle.TextSize = 14
-	SliderTitle.TextScaled = true
-	SliderTitle.TextWrapped = true
-	SliderTitle.TextXAlignment = Enum.TextXAlignment.Right
-	SliderTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		SliderTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	SliderTitle.Parent = SliderTemplate
+	local i50 = Instance.new("TextButton")
+	i50.Name = "DiscordButton"
+	i50.Parent = i48
+	SetSafe(i50, "Active", false)
+	SetSafe(i50, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i50, "BackgroundColor3", Color3.new(0.917647123336792, 0, 0.0313725508749485))
+	SetSafe(i50, "BackgroundTransparency", 0)
+	SetSafe(i50, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i50, "BorderSizePixel", 0)
+	SetSafe(i50, "ClipsDescendants", false)
+	SetSafe(i50, "FontFace", Font.new("rbxasset://fonts/families/LegacyArial.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i50, "LayoutOrder", 0)
+	SetSafe(i50, "Position", UDim2.new(0.08875739574432373, 0, 0.12364425510168076, 0))
+	SetSafe(i50, "Rotation", 0)
+	SetSafe(i50, "Size", UDim2.new(0, 153, 0, -57))
+	SetSafe(i50, "Text", "Discord")
+	SetSafe(i50, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i50, "TextScaled", false)
+	SetSafe(i50, "TextSize", 25.0)
+	SetSafe(i50, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i50, "TextStrokeTransparency", 1.0)
+	SetSafe(i50, "TextTransparency", 0)
+	SetSafe(i50, "TextWrapped", true)
+	SetSafe(i50, "TextXAlignment", 2)
+	SetSafe(i50, "TextYAlignment", 1)
+	SetSafe(i50, "Visible", true)
+	SetSafe(i50, "ZIndex", 1)
 
-	local SliderTrack = Instance.new("Frame")
-	SliderTrack.Name = "SliderTrack"
-	SliderTrack.Position = UDim2Exact(
-		0.570576548576355,
-		0,
-		0.2800000011920929,
-		0
-	)
-	SliderTrack.Size = UDim2Exact(0, 199, 0, 22)
-	SliderTrack.BackgroundColor3 = Color3Exact(0, 0, 0)
-	SliderTrack.BackgroundTransparency = 0.4
-	SliderTrack.BorderSizePixel = 0
-	SliderTrack.Parent = SliderTemplate
+	local i51 = Instance.new("UIStroke")
+	i51.Name = "UIStroke"
+	i51.Parent = i50
+	SetSafe(i51, "ApplyStrokeMode", E("ApplyStrokeMode", 1))
+	SetSafe(i51, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i51, "Color", Color3.new(0, 0, 0))
+	SetSafe(i51, "Enabled", true)
+	SetSafe(i51, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i51, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i51, "Thickness", 3.0)
+	SetSafe(i51, "Transparency", 0)
+	SetSafe(i51, "ZIndex", 1)
 
-	CriarStroke(
-		SliderTrack,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Inner
-	)
+	local i52 = Instance.new("UIStroke")
+	i52.Name = "UIStroke1"
+	i52.Parent = i50
+	SetSafe(i52, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i52, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i52, "Color", Color3.new(0, 0, 0))
+	SetSafe(i52, "Enabled", true)
+	SetSafe(i52, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i52, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i52, "Thickness", 3.0)
+	SetSafe(i52, "Transparency", 0)
+	SetSafe(i52, "ZIndex", 1)
 
-	local FillButton = Instance.new("TextButton")
-	FillButton.Name = "FillButton"
-	FillButton.Position = UDim2Exact(
-		0.588,
-		0,
-		-0.095,
-		0
-	)
-	FillButton.Size = UDim2Exact(0, 23, 0, 28)
-	FillButton.BackgroundColor3 = Color3Exact(1, 1, 1)
-	FillButton.BorderSizePixel = 0
-	FillButton.Text = ""
-	FillButton.AutoButtonColor = true
-	FillButton.ZIndex = 2
-	FillButton.Parent = SliderTrack
+	local i53 = Instance.new("Frame")
+	i53.Name = "UiStroke"
+	i53.Parent = i50
+	SetSafe(i53, "Active", false)
+	SetSafe(i53, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i53, "BackgroundColor3", Color3.new(0.5098039507865906, 0, 0.02352941408753395))
+	SetSafe(i53, "BackgroundTransparency", 0)
+	SetSafe(i53, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i53, "BorderSizePixel", 0)
+	SetSafe(i53, "ClipsDescendants", false)
+	SetSafe(i53, "LayoutOrder", 0)
+	SetSafe(i53, "Position", UDim2.new(0, 0, 0.8771929740905762, 0))
+	SetSafe(i53, "Rotation", 0)
+	SetSafe(i53, "Size", UDim2.new(0, 153, 0, 7))
+	SetSafe(i53, "Visible", true)
+	SetSafe(i53, "ZIndex", 1)
 
-	local Progress = Instance.new("Frame")
-	Progress.Name = "Progress"
-	Progress.Position = UDim2Exact(
-		0.0011473995400592685,
-		0,
-		0.052727438509464264,
-		0
-	)
-	Progress.Size = UDim2Exact(0, 128, 0, 22)
-	Progress.BackgroundColor3 = Color3Exact(
-		0,
-		1,
-		0.06666667014360428
-	)
-	Progress.BorderSizePixel = 0
-	Progress.Parent = SliderTrack
+	local i54 = Instance.new("TextButton")
+	i54.Name = "ConfigButton"
+	i54.Parent = i48
+	SetSafe(i54, "Active", false)
+	SetSafe(i54, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i54, "BackgroundColor3", Color3.new(0.917647123336792, 0, 0.0313725508749485))
+	SetSafe(i54, "BackgroundTransparency", 0)
+	SetSafe(i54, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i54, "BorderSizePixel", 0)
+	SetSafe(i54, "ClipsDescendants", false)
+	SetSafe(i54, "FontFace", Font.new("rbxasset://fonts/families/LegacyArial.json", E("FontWeight", 700), E("FontStyle", 0)))
+	SetSafe(i54, "LayoutOrder", 0)
+	SetSafe(i54, "Position", UDim2.new(0.08875739574432373, 0, 0.12364425510168076, 0))
+	SetSafe(i54, "Rotation", 0)
+	SetSafe(i54, "Size", UDim2.new(0, 153, 0, -57))
+	SetSafe(i54, "Text", "Config")
+	SetSafe(i54, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i54, "TextScaled", false)
+	SetSafe(i54, "TextSize", 25.0)
+	SetSafe(i54, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i54, "TextStrokeTransparency", 1.0)
+	SetSafe(i54, "TextTransparency", 0)
+	SetSafe(i54, "TextWrapped", true)
+	SetSafe(i54, "TextXAlignment", 2)
+	SetSafe(i54, "TextYAlignment", 1)
+	SetSafe(i54, "Visible", true)
+	SetSafe(i54, "ZIndex", 1)
 
-	-- Garante a ordem correta na pasta.
-	InfoCardTemplate.LayoutOrder = 1
-	ToggleTemplate.LayoutOrder = 2
-	DropdownTemplate.LayoutOrder = 3
-	SliderTemplate.LayoutOrder = 4
+	local i55 = Instance.new("UIStroke")
+	i55.Name = "UIStroke"
+	i55.Parent = i54
+	SetSafe(i55, "ApplyStrokeMode", E("ApplyStrokeMode", 1))
+	SetSafe(i55, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i55, "Color", Color3.new(0, 0, 0))
+	SetSafe(i55, "Enabled", true)
+	SetSafe(i55, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i55, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i55, "Thickness", 3.0)
+	SetSafe(i55, "Transparency", 0)
+	SetSafe(i55, "ZIndex", 1)
+
+	local i56 = Instance.new("UIStroke")
+	i56.Name = "UIStroke1"
+	i56.Parent = i54
+	SetSafe(i56, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i56, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i56, "Color", Color3.new(0, 0, 0))
+	SetSafe(i56, "Enabled", true)
+	SetSafe(i56, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i56, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i56, "Thickness", 3.0)
+	SetSafe(i56, "Transparency", 0)
+	SetSafe(i56, "ZIndex", 1)
+
+	local i57 = Instance.new("Frame")
+	i57.Name = "UiStroke"
+	i57.Parent = i54
+	SetSafe(i57, "Active", false)
+	SetSafe(i57, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i57, "BackgroundColor3", Color3.new(0.5098039507865906, 0, 0.02352941408753395))
+	SetSafe(i57, "BackgroundTransparency", 0)
+	SetSafe(i57, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i57, "BorderSizePixel", 0)
+	SetSafe(i57, "ClipsDescendants", false)
+	SetSafe(i57, "LayoutOrder", 0)
+	SetSafe(i57, "Position", UDim2.new(0, 0, 0.8771929740905762, 0))
+	SetSafe(i57, "Rotation", 0)
+	SetSafe(i57, "Size", UDim2.new(0, 153, 0, 7))
+	SetSafe(i57, "Visible", true)
+	SetSafe(i57, "ZIndex", 1)
+
+	local i58 = Instance.new("TextLabel")
+	i58.Name = "MenuName"
+	i58.Parent = i1
+	SetSafe(i58, "Active", false)
+	SetSafe(i58, "AnchorPoint", Vector2.new(0, 0))
+	SetSafe(i58, "BackgroundColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i58, "BackgroundTransparency", 1.0)
+	SetSafe(i58, "BorderColor3", Color3.new(0, 0, 0))
+	SetSafe(i58, "BorderSizePixel", 0)
+	SetSafe(i58, "ClipsDescendants", false)
+	SetSafe(i58, "FontFace", Font.new("rbxasset://fonts/families/SourceSansPro.json", E("FontWeight", 700), E("FontStyle", 1)))
+	SetSafe(i58, "LayoutOrder", 0)
+	SetSafe(i58, "Position", UDim2.new(0.03173188120126724, 0, -0.12643933296203613, 0))
+	SetSafe(i58, "Rotation", 0)
+	SetSafe(i58, "Size", UDim2.new(0, 200, 0, 50))
+	SetSafe(i58, "Text", "Frank Hub")
+	SetSafe(i58, "TextColor3", Color3.new(1.0, 1.0, 1.0))
+	SetSafe(i58, "TextScaled", true)
+	SetSafe(i58, "TextSize", 14.0)
+	SetSafe(i58, "TextStrokeColor3", Color3.new(0, 0, 0))
+	SetSafe(i58, "TextStrokeTransparency", 1.0)
+	SetSafe(i58, "TextTransparency", 0)
+	SetSafe(i58, "TextWrapped", true)
+	SetSafe(i58, "TextXAlignment", 2)
+	SetSafe(i58, "TextYAlignment", 1)
+	SetSafe(i58, "Visible", true)
+	SetSafe(i58, "ZIndex", 1)
+
+	local i59 = Instance.new("UIStroke")
+	i59.Name = "UIStroke"
+	i59.Parent = i58
+	SetSafe(i59, "ApplyStrokeMode", E("ApplyStrokeMode", 0))
+	SetSafe(i59, "BorderStrokePosition", E("BorderStrokePosition", 0))
+	SetSafe(i59, "Color", Color3.new(0, 0, 0))
+	SetSafe(i59, "Enabled", true)
+	SetSafe(i59, "LineJoinMode", E("LineJoinMode", 0))
+	SetSafe(i59, "StrokeSizingMode", E("StrokeSizingMode", 0))
+	SetSafe(i59, "Thickness", 3.0)
+	SetSafe(i59, "Transparency", 0)
+	SetSafe(i59, "ZIndex", 1)
 
 	return ScreenGui
 end
 
---==================================================
--- HELPERS DA INSTANCIA
---==================================================
-
-function HubLibrary:_GetRoot()
-	if self._destroyed then
-		return nil
-	end
-
-	return self.ScreenGui
-end
-
-function HubLibrary:_GetTemplates()
-	return self.Templates
-end
-
-function HubLibrary:_CreatePage(nome)
-	local page = Instance.new("ScrollingFrame")
-	page.Name = tostring(nome) .. "Scroll"
-
-	local base = self.TemplateScrollingFrame
-
-	page.Size = base.Size
-	page.Position = base.Position
-	page.AnchorPoint = base.AnchorPoint
-	page.BackgroundColor3 = base.BackgroundColor3
-	page.BackgroundTransparency = base.BackgroundTransparency
-	page.BorderSizePixel = base.BorderSizePixel
-	page.ScrollBarThickness = base.ScrollBarThickness
-	page.ScrollBarImageColor3 = base.ScrollBarImageColor3
-	page.ScrollBarImageTransparency = base.ScrollBarImageTransparency
-	page.AutomaticCanvasSize = Enum.AutomaticSize.None
-	page.CanvasSize = UDim2.new(0, 0, 0, 0)
-	page.ScrollingDirection = Enum.ScrollingDirection.XY
-	page.Visible = false
-	page.ZIndex = base.ZIndex
-	page.Parent = self.BackGround
-
-	local oldPadding = base:FindFirstChildOfClass("UIPadding")
-
-	if oldPadding then
-		local padding = oldPadding:Clone()
-		padding.Parent = page
-	end
-
-	local layout = Instance.new("UIListLayout")
-	layout.Name = "UIListLayout"
-
-	local baseLayout = base:FindFirstChildOfClass("UIListLayout")
-
-	if baseLayout then
-		layout.Padding = baseLayout.Padding
-		layout.FillDirection = baseLayout.FillDirection
-		layout.HorizontalAlignment = baseLayout.HorizontalAlignment
-		layout.VerticalAlignment = baseLayout.VerticalAlignment
-		layout.SortOrder = baseLayout.SortOrder
-	else
-		layout.Padding = UDim.new(0, 6)
-		layout.FillDirection = Enum.FillDirection.Vertical
-		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-		layout.VerticalAlignment = Enum.VerticalAlignment.Center
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-	end
-
-	layout.Parent = page
-
-	local connection = layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		if not self._destroyed and page.Parent then
-			page.CanvasSize = UDim2.new(
-				0,
-				0,
-				0,
-				math.max(0, layout.AbsoluteContentSize.Y + 20)
-			)
-		end
-	end)
-
-	table.insert(self._connections, connection)
-
-	return page
-end
-
-function HubLibrary:_CloneTemplate(name, page)
-	local template = self.Templates and self.Templates:FindFirstChild(name)
-
-	if not template then
-		warn("[Frank Hub] Template ausente:", name)
-		return nil
-	end
-
-	local clone = template:Clone()
-	clone.Visible = true
-	clone.Parent = page
-
-	return clone
-end
-
---==================================================
--- CARREGAR
---==================================================
-
 function HubLibrary.Carregar(nomeDoHub)
 	local self = setmetatable({}, HubLibrary)
-
+	self._destroyed = false
+	self._connections = {}
 	self.Abas = {}
 	self.AbaAtiva = nil
-	self._connections = {}
-	self._itemConnections = {}
-	self._destroyed = false
-	self.OnDiscord = nil
-	self.ConfigCallback = nil
-	self.ConfigTab = nil
-
-	local ScreenGui = HubLibrary._CriarInterface()
-
-	self.ScreenGui = ScreenGui
-	self.BackGround = ScreenGui:FindFirstChild("BackGround")
-	self.TemplateScrollingFrame =
-		self.BackGround:FindFirstChild("ScrollingFrame")
-	self.Templates =
-		self.TemplateScrollingFrame:FindFirstChild("Templates")
-
-	-- Interface criada pelo arquivo.
-	local tabFrames = {}
+	self.ScreenGui = HubLibrary._CreateInterface()
+	self.BackGround = self.ScreenGui:WaitForChild("BackGround")
+	self.TemplateScrollingFrame = self.BackGround:WaitForChild("ScrollingFrame")
+	self.Templates = self.TemplateScrollingFrame:WaitForChild("Templates")
+	self.TabButtonsFrame = self.BackGround:WaitForChild("TabButtonsFrame")
+	self.FixedButtonsFrame = nil
 
 	for _, child in ipairs(self.BackGround:GetChildren()) do
-		if child:IsA("Frame") and child.Name == "TabButtonsFrame" then
-			table.insert(tabFrames, child)
+		if child:IsA("Frame") and child.Name == "TabButtonsFrame" and child ~= self.TabButtonsFrame then
+			self.FixedButtonsFrame = child
+			break
 		end
 	end
 
-	self.TabButtonsFrame = tabFrames[1]
-	self.FixedButtonsFrame = tabFrames[2]
+	local menuName = self.BackGround:FindFirstChild("MenuName")
+	if menuName and nomeDoHub ~= nil then menuName.Text = tostring(nomeDoHub) end
 
-	local MenuName = self.BackGround:FindFirstChild("MenuName")
-
-	-- MenuName sera criado logo abaixo quando a funcao
-	-- de insercao for executada.
-	if not MenuName then
-		MenuName = Instance.new("TextLabel")
-		MenuName.Name = "MenuName"
-		MenuName.Position = UDim2Exact(
-			0.03173188120126724,
-			0,
-			-0.12643933296203613,
-			0
-		)
-		MenuName.Size = UDim2Exact(0, 200, 0, 50)
-		MenuName.BackgroundTransparency = 1
-		MenuName.Text = tostring(nomeDoHub or "Frank Hub")
-		MenuName.TextColor3 = Color3Exact(1, 1, 1)
-		MenuName.TextSize = 14
-		MenuName.TextScaled = true
-		MenuName.TextWrapped = true
-		MenuName.TextXAlignment = Enum.TextXAlignment.Right
-		MenuName.TextYAlignment = Enum.TextYAlignment.Center
-		SetTextFont(
-			MenuName,
-			"rbxasset://fonts/families/SourceSansPro.json",
-			700,
-			true
-		)
-		MenuName.ZIndex = 1
-		MenuName.Parent = self.BackGround
-
-		CriarStroke(
-			MenuName,
-			"UIStroke",
-			3,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Border,
-			Enum.BorderStrokePosition.Outer
-		)
+	-- O Folder Templates e oculto no funcionamento; ele existe apenas como modelo visual.
+	for _, item in ipairs(self.Templates:GetChildren()) do
+		if item:IsA("GuiObject") then item.Visible = false end
 	end
 
-	MenuName.Text = tostring(nomeDoHub or "Frank Hub")
-
-	--==================================================
-	-- Close
-	--==================================================
-
-	local Close = Instance.new("TextButton")
-	Close.Name = "Close"
-	Close.Position = UDim2Exact(
-		0.9155639410018921,
-		0,
-		-0.10804338753223419,
-		0
-	)
-	Close.Size = UDim2Exact(
-		0.07383592426776886,
-		0,
-		0.06910896301269531,
-		0
-	)
-	Close.BackgroundColor3 = Color3Exact(
-		1,
-		0.27450981736183167,
-		0.2862745225429535
-	)
-	Close.BorderSizePixel = 0
-	Close.Text = "X"
-	Close.TextColor3 = Color3Exact(1, 1, 1)
-	Close.TextSize = 14
-	Close.TextScaled = true
-	Close.TextWrapped = true
-	Close.TextXAlignment = Enum.TextXAlignment.Right
-	Close.TextYAlignment = Enum.TextYAlignment.Center
-	Close.Active = true
-	Close.ZIndex = 1
-	SetTextFont(
-		Close,
-		"rbxasset://fonts/families/GothamSSm.json",
-		900,
-		false
-	)
-	Close.Parent = self.BackGround
-
-	CriarStroke(
-		Close,
-		"UIStroke",
-		2.1,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	CriarStroke(
-		Close,
-		"UIStroke1",
-		3.5,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Contextual,
-		Enum.BorderStrokePosition.Outer,
-		Enum.LineJoinMode.Miter
-	)
-
-	local CloseRatio = Instance.new("UIAspectRatioConstraint")
-	CloseRatio.Name = "UIAspectRatioConstraint"
-	CloseRatio.AspectRatio = 1.0327868461608887
-	SetSafe(
-		CloseRatio,
-		"AspectType",
-		Enum.AspectType.FitWithinMaxSize
-	)
-	SetSafe(
-		CloseRatio,
-		"DominantAxis",
-		Enum.DominantAxis.Width
-	)
-	CloseRatio.Parent = Close
-
-	local CloseImage = Instance.new("ImageLabel")
-	CloseImage.Name = "ImageLabel"
-	CloseImage.Position = UDim2Exact(
-		-0.020998133346438408,
-		0,
-		-0.00829874724149704,
-		0
-	)
-	CloseImage.Size = UDim2Exact(
-		1.0000001192092896,
-		0,
-		0.9836075305938721,
-		0
-	)
-	CloseImage.BackgroundColor3 = Color3Exact(
-		0.4941176772117615,
-		0.8823530077934265,
-		1
-	)
-	CloseImage.BackgroundTransparency = 1
-	CloseImage.BorderSizePixel = 0
-	CloseImage.Image = "rbxassetid://8398274754"
-	CloseImage.ImageColor3 = Color3Exact(1, 1, 1)
-	CloseImage.ImageTransparency = 0.61
-	CloseImage.ScaleType = Enum.ScaleType.Crop
-	CloseImage.Parent = Close
-
-	--==================================================
-	-- Segundo TabButtonsFrame
-	--==================================================
-
-	local FixedFrame = self.FixedButtonsFrame
-
-	if not FixedFrame then
-		FixedFrame = Instance.new("Frame")
-		FixedFrame.Name = "TabButtonsFrame"
-		FixedFrame.Position = UDim2Exact(
-			1.0430711507797241,
-			0,
-			0.026639344170689583,
-			0
-		)
-		FixedFrame.Size = UDim2Exact(0, 169, 0, 461)
-		FixedFrame.BackgroundTransparency = 1
-		FixedFrame.Parent = self.BackGround
-
-		local fixedLayout = Instance.new("UIListLayout")
-		fixedLayout.Name = "UIListLayout"
-		fixedLayout.FillDirection = Enum.FillDirection.Horizontal
-		fixedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-		fixedLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-		fixedLayout.Padding = UDimExact(0, 75)
-		fixedLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		fixedLayout.Parent = FixedFrame
-
-		self.FixedButtonsFrame = FixedFrame
-	end
-
-	local function CriarFixedButton(name, text)
-		local button = Instance.new("TextButton")
-		button.Name = name
-		button.Position = UDim2Exact(
-			0.08875739574432373,
-			0,
-			0.12364425510168076,
-			0
-		)
-		button.Size = UDim2Exact(0, 153, 0, -57)
-		button.BackgroundColor3 = Color3Exact(
-			234 / 255,
-			0,
-			8 / 255
-		)
-		button.BorderSizePixel = 0
-		button.Text = text
-		button.TextColor3 = Color3Exact(1, 1, 1)
-		button.TextSize = 25
-		button.TextScaled = false
-		button.TextWrapped = true
-		button.TextXAlignment = Enum.TextXAlignment.Right
-		button.TextYAlignment = Enum.TextYAlignment.Center
-		button.AutoButtonColor = true
-		SetTextFont(
-			button,
-			"rbxasset://fonts/families/LegacyArial.json",
-			700,
-			false
-		)
-		button.Parent = FixedFrame
-
-		CriarStroke(
-			button,
-			"UIStroke",
-			3,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Contextual,
-			Enum.BorderStrokePosition.Outer
-		)
-
-		local InnerStroke = Instance.new("Frame")
-		InnerStroke.Name = "UiStroke"
-		InnerStroke.Position = UDim2Exact(
-			0,
-			0,
-			0.8771929740905762,
-			0
-		)
-		InnerStroke.Size = UDim2Exact(0, 153, 0, 7)
-		InnerStroke.BackgroundColor3 = Color3Exact(
-			130 / 255,
-			0,
-			6 / 255
-		)
-		InnerStroke.BorderSizePixel = 0
-		InnerStroke.Parent = button
-
-		CriarStroke(
-			button,
-			"UIStroke1",
-			3,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Contextual,
-			Enum.BorderStrokePosition.Outer
-		)
-
-		return button
-	end
-
-	local DiscordButton = FixedFrame:FindFirstChild("DiscordButton")
-	local ConfigButton = FixedFrame:FindFirstChild("ConfigButton")
-
-	if not DiscordButton then
-		DiscordButton = CriarFixedButton("DiscordButton", "Discord")
-	end
-
-	if not ConfigButton then
-		ConfigButton = CriarFixedButton("ConfigButton", "Config")
-	end
-
-	Conectar(self._connections, DiscordButton.MouseButton1Click, function()
-		ExecutarCallback(self.OnDiscord)
-	end)
-
-	Conectar(self._connections, ConfigButton.MouseButton1Click, function()
-		if self.ConfigCallback then
-			ExecutarCallback(self.ConfigCallback)
-		elseif self.ConfigTab then
-			self:SelecionarAba(self.ConfigTab)
-		end
-	end)
-
-	--==================================================
-	-- Drag
-	--==================================================
-
-	local BackGroundTop = self.BackGround:FindFirstChild("BackGroundTop")
-
-	if BackGroundTop and BackGroundTop:IsA("GuiObject") then
+	-- Drag da janela.
+	local top = self.BackGround:FindFirstChild("BackGroundTop")
+	if top then
 		local dragging = false
 		local startMouse
 		local startPosition
-
-		Conectar(self._connections, BackGroundTop.InputBegan, function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = true
-				startMouse = input.Position
-				startPosition = self.BackGround.Position
+		table.insert(self._connections, top.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true; startMouse = input.Position; startPosition = self.BackGround.Position
 			end
-		end)
-
-		Conectar(self._connections, BackGroundTop.InputEnded, function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = false
-			end
-		end)
-
-		Conectar(self._connections, UserInputService.InputChanged, function(input)
-			if self._destroyed or not dragging then
-				return
-			end
-
-			if input.UserInputType ~= Enum.UserInputType.MouseMovement
-				and input.UserInputType ~= Enum.UserInputType.Touch then
-				return
-			end
-
-			if not startMouse or not startPosition then
-				return
-			end
-
+		end))
+		table.insert(self._connections, top.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+		end))
+		table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
+			if self._destroyed or not dragging or not startMouse or not startPosition then return end
+			if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
 			local delta = input.Position - startMouse
-
-			self.BackGround.Position = UDim2.new(
-				startPosition.X.Scale,
-				startPosition.X.Offset + delta.X,
-				startPosition.Y.Scale,
-				startPosition.Y.Offset + delta.Y
-			)
-		end)
+			self.BackGround.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+		end))
 	end
+
+	local close = self.BackGround:FindFirstChild("Close")
+	if close and close:IsA("GuiButton") then
+		table.insert(self._connections, close.MouseButton1Click:Connect(function() self:Destroy() end))
+	end
+
+	-- Melhorias de experiencia sem alterar o desenho base.
+	self:_EnhanceInterface()
 
 	return self
 end
 
 --==================================================
--- SELECAO DE ABA
+-- MELHORIAS DA INTERFACE
 --==================================================
 
-function HubLibrary:SelecionarAba(aba)
-	if self._destroyed or not aba then
+function HubLibrary:_EnhanceInterface()
+	if self._destroyed then
 		return
 	end
 
-	for _, other in ipairs(self.Abas) do
-		if other.Scroll and other.Scroll.Parent then
-			other.Scroll.Visible = false
+	self._featureConnections = self._featureConnections or {}
+
+	local function connect(signal, callback)
+		if not signal then
+			return
 		end
 
-		if other.Btn and other.Btn.Parent then
-			other.Btn.BackgroundColor3 = COR_TAB_NORMAL
-			other.Btn.TextColor3 = COR_TEXTO
+		local connection = signal:Connect(callback)
+		table.insert(self._featureConnections, connection)
+	end
+
+	--==================================================
+	-- ESCALA RESPONSIVA
+	-- Mantem a interface proporcional em resolucoes menores.
+	--==================================================
+
+	local BackGround = self.BackGround
+
+	if BackGround then
+		local scale = BackGround:FindFirstChild("FrankHubScale")
+
+		if not scale then
+			scale = Instance.new("UIScale")
+			scale.Name = "FrankHubScale"
+			scale.Scale = 1
+			scale.Parent = BackGround
+		end
+
+		local function atualizarEscala()
+			if self._destroyed or not BackGround.Parent then
+				return
+			end
+
+			local camera = workspace.CurrentCamera
+			if not camera then
+				return
+			end
+
+			local viewport = camera.ViewportSize
+			local sx = viewport.X / 900
+			local sy = viewport.Y / 700
+			local target = math.min(sx, sy)
+			target = math.clamp(target, 0.68, 1.15)
+
+			scale.Scale = target
+		end
+
+		atualizarEscala()
+
+		local camera = workspace.CurrentCamera
+		if camera then
+			connect(camera:GetPropertyChangedSignal("ViewportSize"), atualizarEscala)
 		end
 	end
 
-	if aba.Scroll and aba.Scroll.Parent then
-		aba.Scroll.Visible = true
+	--==================================================
+	-- ANIMACAO DE HOVER DOS BOTOES
+	--==================================================
+
+	local function aplicarHover(button)
+		if not button or not button:IsA("GuiButton") then
+			return
+		end
+
+		local baseColor = button.BackgroundColor3
+
+		connect(button.MouseEnter, function()
+			if self._destroyed or not button.Parent then
+				return
+			end
+
+			local targetColor = Color3.new(
+				math.clamp(baseColor.R + 0.06, 0, 1),
+				math.clamp(baseColor.G + 0.06, 0, 1),
+				math.clamp(baseColor.B + 0.06, 0, 1)
+			)
+
+			TweenService:Create(
+				button,
+				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{BackgroundColor3 = targetColor}
+			):Play()
+		end)
+
+		connect(button.MouseLeave, function()
+			if self._destroyed or not button.Parent then
+				return
+			end
+
+			TweenService:Create(
+				button,
+				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{BackgroundColor3 = baseColor}
+			):Play()
+		end)
 	end
 
-	if aba.Btn and aba.Btn.Parent then
-		aba.Btn.BackgroundColor3 = COR_TAB_ATIVA
-		aba.Btn.TextColor3 = COR_TEXTO
+	local function aplicarHoverRecursivo(parent)
+		if not parent then
+			return
+		end
+
+		for _, child in ipairs(parent:GetChildren()) do
+			if child:IsA("GuiButton") then
+				aplicarHover(child)
+			end
+		end
 	end
 
-	self.AbaAtiva = aba
+	aplicarHoverRecursivo(self.BackGround)
 
-	ExecutarCallback(aba._onSelected, aba)
-end
+	--==================================================
+	-- TECLA DE ABRIR/FECHAR
+	-- Padrao: RightControl
+	--==================================================
 
---==================================================
--- ADD TAB
---==================================================
+	self.ToggleKey = Enum.KeyCode.RightControl
 
-function HubLibrary:AddTab(nomeDaAba)
-	if self._destroyed or not self.TabButtonsFrame then
-		return nil
-	end
+	connect(UserInputService.InputBegan, function(input, gameProcessed)
+		if self._destroyed or gameProcessed then
+			return
+		end
 
-	local tabTemplate = self.TabButtonsFrame:FindFirstChild("Aba1")
-
-	if not tabTemplate then
-		warn("[Frank Hub] Aba1 nao encontrada.")
-		return nil
-	end
-
-	tabTemplate.Visible = false
-
-	local TabButton = tabTemplate:Clone()
-	TabButton.Name = tostring(nomeDaAba) .. "Button"
-	TabButton.Text = tostring(nomeDaAba)
-	TabButton.Visible = true
-	TabButton.Parent = self.TabButtonsFrame
-
-	local ScrollingPage = self:_CreatePage(nomeDaAba)
-
-	local abaSelf = {
-		ScrollingFrame = ScrollingPage,
-		Scroll = ScrollingPage,
-		Btn = TabButton,
-		_hub = self,
-		_destroyed = false,
-		Name = tostring(nomeDaAba),
-	}
-
-	Conectar(self._connections, TabButton.MouseButton1Click, function()
-		if not self._destroyed and not abaSelf._destroyed then
-			self:SelecionarAba(abaSelf)
+		if input.KeyCode == self.ToggleKey then
+			self:ToggleVisible()
 		end
 	end)
 
-	table.insert(self.Abas, abaSelf)
+	--==================================================
+	-- FECHAR TAMBEM COM ESC
+	--==================================================
 
-	if #self.Abas == 1 then
-		self:SelecionarAba(abaSelf)
-	end
-
-	return setmetatable(abaSelf, {
-		__index = HubLibrary
-	})
-end
-
---==================================================
--- ADD TOGGLE
---==================================================
-
-function HubLibrary:AddToggle(texto, callback, valorInicial)
-	if self._destroyed or not self.Scroll then
-		return nil
-	end
-
-	local hub = self._hub or self
-	local clone = hub:_CloneTemplate("ToggleTemplate", self.Scroll)
-
-	if not clone then
-		return nil
-	end
-
-	local TitleLabel = clone:FindFirstChild("TitleLabel")
-	local ToggleButton = clone:FindFirstChild("ToggleButton")
-
-	if TitleLabel and TitleLabel:IsA("TextLabel") then
-		TitleLabel.Text = tostring(texto)
-	end
-
-	if not ToggleButton or not ToggleButton:IsA("TextButton") then
-		clone:Destroy()
-		warn("[Frank Hub] ToggleButton nao encontrado.")
-		return nil
-	end
-
-	local ativo = valorInicial == true
-
-	local function Atualizar()
-		local cor = ativo and COR_VERDE or COR_CONTROLE
-		ToggleButton.BackgroundColor3 = cor
-
-		local line = ToggleButton:FindFirstChild("ButtonLine")
-
-		if line and line:IsA("GuiObject") then
-			line.BackgroundColor3 =
-				ativo and Color3.fromRGB(255, 255, 255)
-				or Color3.fromRGB(100, 100, 100)
-
-			if line:IsA("Frame") then
-				line.Visible = true
-			end
-		end
-	end
-
-	local function Set(valor, disparar)
-		ativo = valor == true
-
-		local targetColor = ativo
-			and COR_VERDE
-			or COR_CONTROLE
-
-		if ToggleButton.Parent then
-			TweenService:Create(
-				ToggleButton,
-				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{
-					BackgroundColor3 = targetColor
-				}
-			):Play()
-		end
-
-		Atualizar()
-
-		if disparar ~= false then
-			ExecutarCallback(callback, ativo)
-		end
-	end
-
-	Atualizar()
-
-	Conectar(
-		hub._itemConnections,
-		ToggleButton.MouseButton1Click,
-		function()
-			if clone.Parent then
-				Set(not ativo, true)
-			end
-		end
-	)
-
-	return {
-		Set = function(_, valor)
-			Set(valor, true)
-		end,
-
-		Get = function()
-			return ativo
-		end,
-
-		Object = clone,
-		Button = ToggleButton,
-	}
-end
-
---==================================================
--- ADD SLIDER
---==================================================
-
-function HubLibrary:AddSlider(
-	texto,
-	valorMin,
-	valorMax,
-	valorPadrao,
-	callback
-)
-	if self._destroyed or not self.Scroll then
-		return nil
-	end
-
-	local hub = self._hub or self
-
-	valorMin = tonumber(valorMin) or 0
-	valorMax = tonumber(valorMax) or 100
-	valorPadrao = tonumber(valorPadrao) or valorMin
-
-	if valorMax < valorMin then
-		valorMin, valorMax = valorMax, valorMin
-	end
-
-	valorPadrao = math.clamp(
-		valorPadrao,
-		valorMin,
-		valorMax
-	)
-
-	local valorAtual = valorPadrao
-
-	local clone = hub:_CloneTemplate("SliderTemplate", self.Scroll)
-
-	if not clone then
-		return nil
-	end
-
-	local TitleLabel = clone:FindFirstChild("TitleLabel")
-	local SliderTrack = clone:FindFirstChild("SliderTrack")
-
-	if not SliderTrack then
-		clone:Destroy()
-		warn("[Frank Hub] SliderTrack nao encontrado.")
-		return nil
-	end
-
-	local FillButton =
-		SliderTrack:FindFirstChild("FillButton")
-
-	local Progress =
-		SliderTrack:FindFirstChild("Progress")
-
-	if not FillButton
-		or not FillButton:IsA("TextButton")
-		or not Progress
-		or not Progress:IsA("GuiObject") then
-
-		clone:Destroy()
-		warn("[Frank Hub] Slider incompleto.")
-		return nil
-	end
-
-	local function Atualizar()
-		local percentual = 0
-
-		if valorMax ~= valorMin then
-			percentual =
-				(valorAtual - valorMin)
-				/ (valorMax - valorMin)
-		end
-
-		percentual = math.clamp(percentual, 0, 1)
-
-		Progress.Size = UDim2.new(
-			percentual,
-			0,
-			Progress.Size.Y.Scale,
-			Progress.Size.Y.Offset
-		)
-
-		FillButton.Position = UDim2.new(
-			percentual,
-			0,
-			FillButton.Position.Y.Scale,
-			FillButton.Position.Y.Offset
-		)
-
-		if TitleLabel and TitleLabel:IsA("TextLabel") then
-			TitleLabel.Text =
-				tostring(texto)
-				.. " ("
-				.. tostring(valorAtual)
-				.. ")"
-		end
-	end
-
-	local function DefinirPorX(x)
-		if not SliderTrack.Parent then
+	connect(UserInputService.InputBegan, function(input)
+		if self._destroyed then
 			return
 		end
 
-		local largura =
-			SliderTrack.AbsoluteSize.X
-
-		if largura <= 0 then
-			return
+		if input.KeyCode == Enum.KeyCode.Escape then
+			self:SetVisible(false)
 		end
-
-		local percentual =
-			(x - SliderTrack.AbsolutePosition.X)
-			/ largura
-
-		percentual =
-			math.clamp(percentual, 0, 1)
-
-		valorAtual = math.round(
-			valorMin
-			+ ((valorMax - valorMin) * percentual)
-		)
-
-		Atualizar()
-		ExecutarCallback(callback, valorAtual)
-	end
-
-	local dragging = false
-
-	Conectar(
-		hub._itemConnections,
-		SliderTrack.InputBegan,
-		function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = true
-				DefinirPorX(input.Position.X)
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		FillButton.InputBegan,
-		function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = true
-				DefinirPorX(input.Position.X)
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		UserInputService.InputEnded,
-		function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = false
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		UserInputService.InputChanged,
-		function(input)
-			if not dragging then
-				return
-			end
-
-			if input.UserInputType ~= Enum.UserInputType.MouseMovement
-				and input.UserInputType ~= Enum.UserInputType.Touch then
-				return
-			end
-
-			DefinirPorX(input.Position.X)
-		end
-	)
-
-	Atualizar()
-
-	return {
-		Set = function(_, valor)
-			local numero = tonumber(valor)
-
-			if numero == nil then
-				return
-			end
-
-			valorAtual = math.clamp(
-				math.round(numero),
-				valorMin,
-				valorMax
-			)
-
-			Atualizar()
-			ExecutarCallback(callback, valorAtual)
-		end,
-
-		Get = function()
-			return valorAtual
-		end,
-
-		Object = clone,
-		Track = SliderTrack,
-		FillButton = FillButton,
-	}
+	end)
 end
 
---==================================================
--- ADD DROPDOWN
---==================================================
-
-function HubLibrary:AddDropdown(
-	texto,
-	opcoes,
-	callback,
-	valorInicial
-)
-	if self._destroyed or not self.Scroll then
-		return nil
+function HubLibrary:SetVisible(visible)
+	if self._destroyed or not self.ScreenGui then
+		return
 	end
 
-	local hub = self._hub or self
-
-	opcoes =
-		typeof(opcoes) == "table"
-		and opcoes
-		or {}
-
-	local valorAtual = valorInicial
-
-	if valorAtual == nil then
-		if #opcoes > 0 then
-			valorAtual = opcoes[1]
-		else
-			valorAtual = "Select Option..."
-		end
-	end
-
-	local clone =
-		hub:_CloneTemplate(
-			"DropdownTemplate",
-			self.Scroll
-		)
-
-	if not clone then
-		return nil
-	end
-
-	clone.ClipsDescendants = false
-
-	local TitleLabel = clone:FindFirstChild("TitleLabel")
-	local DropdownButton =
-		clone:FindFirstChild("Frame")
-
-	if TitleLabel and TitleLabel:IsA("TextLabel") then
-		TitleLabel.Text = tostring(texto)
-	end
-
-	if not DropdownButton
-		or not DropdownButton:IsA("TextButton") then
-
-		clone:Destroy()
-		warn("[Frank Hub] Dropdown Button nao encontrado.")
-		return nil
-	end
-
-	local SelectedLabel =
-		DropdownButton:FindFirstChild("TitleLabel")
-
-	local Arrow =
-		DropdownButton:FindFirstChild("TextLabel")
-
-	local Container = Instance.new("Frame")
-	Container.Name = "ContainerOpcoes"
-	Container.Size = UDim2.new(
-		0,
-		DropdownButton.Size.X.Offset,
-		0,
-		math.max(1, #opcoes * 30)
-	)
-	Container.Position = UDim2.new(
-		0,
-		DropdownButton.Position.X.Offset,
-		0,
-		DropdownButton.Position.Y.Offset
-			+ DropdownButton.Size.Y.Offset
-			+ 5
-	)
-	Container.BackgroundColor3 =
-		Color3.fromRGB(25, 25, 25)
-	Container.BorderSizePixel = 0
-	Container.Visible = false
-	Container.ZIndex = 100
-	Container.Parent = clone
-
-	CriarStroke(
-		Container,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	CriarCorner(Container, 5)
-
-	local Layout =
-		Instance.new("UIListLayout")
-
-	Layout.Name = "UIListLayout"
-	Layout.FillDirection =
-		Enum.FillDirection.Vertical
-	Layout.SortOrder =
-		Enum.SortOrder.LayoutOrder
-	Layout.Parent = Container
-
-	local opened = false
-	local originalSize = clone.Size
-
-	local function AtualizarTexto()
-		local current =
-			valorAtual == nil
-			and "Select Option..."
-			or tostring(valorAtual)
-
-		if SelectedLabel
-			and SelectedLabel:IsA("TextLabel") then
-
-			SelectedLabel.Text = current
-		end
-
-		if Arrow
-			and Arrow:IsA("TextLabel") then
-
-			Arrow.Text =
-				opened and "v" or "^"
-		end
-	end
-
-	local function Fechar()
-		opened = false
-		Container.Visible = false
-
-		AtualizarTexto()
-
-		TweenService:Create(
-			clone,
-			TweenInfo.new(
-				0.16,
-				Enum.EasingStyle.Quad,
-				Enum.EasingDirection.Out
-			),
-			{
-				Size = originalSize
-			}
-		):Play()
-	end
-
-	local function Abrir()
-		if #opcoes == 0 then
-			return
-		end
-
-		opened = true
-		Container.Visible = true
-		AtualizarTexto()
-
-		TweenService:Create(
-			clone,
-			TweenInfo.new(
-				0.16,
-				Enum.EasingStyle.Quad,
-				Enum.EasingDirection.Out
-			),
-			{
-				Size = UDim2.new(
-					originalSize.X.Scale,
-					originalSize.X.Offset,
-					0,
-					originalSize.Y.Offset
-						+ (#opcoes * 30)
-						+ 10
-				)
-			}
-		):Play()
-	end
-
-	AtualizarTexto()
-
-	Conectar(
-		hub._itemConnections,
-		DropdownButton.MouseButton1Click,
-		function()
-			if opened then
-				Fechar()
-			else
-				Abrir()
-			end
-		end
-	)
-
-	for indice, opcao in ipairs(opcoes) do
-		local button =
-			Instance.new("TextButton")
-
-		button.Name =
-			"Option" .. tostring(indice)
-
-		button.LayoutOrder = indice
-		button.Size =
-			UDim2.new(1, 0, 0, 30)
-
-		button.BackgroundColor3 =
-			Color3.fromRGB(25, 25, 25)
-
-		button.BorderSizePixel = 0
-		button.Text = tostring(opcao)
-		button.TextColor3 =
-			Color3.fromRGB(255, 255, 255)
-		button.TextSize = 16
-		button.Font = Enum.Font.SourceSans
-		button.ZIndex = 101
-		button.AutoButtonColor = false
-		button.Parent = Container
-
-		Conectar(
-			hub._itemConnections,
-			button.MouseEnter,
-			function()
-				button.BackgroundColor3 =
-					Color3.fromRGB(45, 45, 45)
-			end
-		)
-
-		Conectar(
-			hub._itemConnections,
-			button.MouseLeave,
-			function()
-				button.BackgroundColor3 =
-					Color3.fromRGB(25, 25, 25)
-			end
-		)
-
-		Conectar(
-			hub._itemConnections,
-			button.MouseButton1Click,
-			function()
-				valorAtual = opcao
-				Fechar()
-				ExecutarCallback(
-					callback,
-					opcao
-				)
-			end
-		)
-	end
-
-	return {
-		Set = function(_, valor)
-			valorAtual = valor
-			AtualizarTexto()
-			ExecutarCallback(
-				callback,
-				valorAtual
-			)
-		end,
-
-		Get = function()
-			return valorAtual
-		end,
-
-		Open = function()
-			Abrir()
-		end,
-
-		Close = function()
-			Fechar()
-		end,
-
-		Object = clone,
-		Button = DropdownButton,
-	}
+	self.ScreenGui.Enabled = visible == true
 end
 
---==================================================
--- ADD INFO CARD
---==================================================
-
-function HubLibrary:AddInfoCard(
-	tituloCard,
-	iconeId,
-	listaDeTextos
-)
-	if self._destroyed or not self.Scroll then
-		return nil
+function HubLibrary:IsVisible()
+	if self._destroyed or not self.ScreenGui then
+		return false
 	end
 
-	local hub = self._hub or self
-
-	listaDeTextos =
-		typeof(listaDeTextos) == "table"
-		and listaDeTextos
-		or {}
-
-	local clone =
-		hub:_CloneTemplate(
-			"InfoCardTemplate",
-			self.Scroll
-		)
-
-	if not clone then
-		return nil
-	end
-
-	local TitleLabel =
-		clone:FindFirstChild("TitleLabel")
-
-	local Icon =
-		clone:FindFirstChild("Icon")
-
-	local ListInformations =
-		clone:FindFirstChild(
-			"ListInformations"
-		)
-
-	if TitleLabel
-		and TitleLabel:IsA("TextLabel") then
-
-		TitleLabel.Text =
-			tostring(tituloCard)
-	end
-
-	if Icon
-		and Icon:IsA("ImageLabel") then
-
-		Icon.Image =
-			tostring(iconeId or
-				"rbxasset://textures/ui/GuiImagePlaceholder.png")
-	end
-
-	if ListInformations
-		and ListInformations:IsA("GuiObject") then
-
-		local template =
-			ListInformations:FindFirstChild(
-				"InformationTextTemplate"
-			)
-
-		if template
-			and template:IsA("TextLabel") then
-
-			template.Visible = false
-
-			for _, child in ipairs(
-				ListInformations:GetChildren()
-			) do
-				if child:IsA("TextLabel")
-					and child ~= template then
-
-					child:Destroy()
-				end
-			end
-
-			for indice, texto in ipairs(
-				listaDeTextos
-			) do
-
-				local info =
-					template:Clone()
-
-				info.Name =
-					"InformationText"
-					.. tostring(indice)
-
-				info.Text =
-					tostring(texto)
-
-				info.LayoutOrder =
-					indice
-
-				info.Visible = true
-				info.Parent =
-					ListInformations
-			end
-		end
-	end
-
-	return {
-		Object = clone
-	}
+	return self.ScreenGui.Enabled
 end
 
---==================================================
--- ADD BUTTON
---==================================================
-
-function HubLibrary:AddButton(texto, callback)
-	if self._destroyed or not self.Scroll then
-		return nil
-	end
-
-	local hub = self._hub or self
-	local clone
-
-	local template =
-		hub.Templates
-		and hub.Templates:FindFirstChild(
-			"ButtonTemplate"
-		)
-
-	if template then
-		clone = template:Clone()
-		clone.Visible = true
-		clone.Parent = self.Scroll
-	else
-		clone = Instance.new("TextButton")
-		clone.Name = "ButtonTemplate"
-		clone.Size =
-			UDim2.new(1, -10, 0, 45)
-		clone.BackgroundColor3 =
-			COR_CARD
-		clone.BorderSizePixel = 0
-		clone.TextColor3 =
-			Color3.fromRGB(255, 255, 255)
-		clone.TextSize = 18
-		clone.Font = Enum.Font.SourceSansBold
-		clone.AutoButtonColor = false
-		clone.Parent = self.Scroll
-		CriarStroke(
-			clone,
-			"UIStroke",
-			2,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Border,
-			Enum.BorderStrokePosition.Outer
-		)
-		CriarCorner(clone, 5)
-	end
-
-	if clone:IsA("TextButton") then
-		clone.Text = tostring(texto)
-	end
-
-	Conectar(
-		hub._itemConnections,
-		clone.MouseEnter,
-		function()
-			if clone.Parent then
-				TweenService:Create(
-					clone,
-					TweenInfo.new(0.12),
-					{
-						BackgroundColor3 =
-							Color3.fromRGB(45, 45, 45)
-					}
-				):Play()
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		clone.MouseLeave,
-		function()
-			if clone.Parent then
-				TweenService:Create(
-					clone,
-					TweenInfo.new(0.12),
-					{
-						BackgroundColor3 =
-							COR_CARD
-					}
-				):Play()
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		clone.MouseButton1Click,
-		function()
-			ExecutarCallback(callback)
-		end
-	)
-
-	return {
-		Object = clone,
-		Button = clone,
-	}
+function HubLibrary:ToggleVisible()
+	self:SetVisible(not self:IsVisible())
 end
 
---==================================================
--- CALLBACKS FIXOS
---==================================================
+function HubLibrary:SetKeybind(keyCode)
+	if typeof(keyCode) ~= "EnumItem" then
+		return false
+	end
+
+	if keyCode.EnumType ~= Enum.KeyCode then
+		return false
+	end
+
+	self.ToggleKey = keyCode
+	return true
+end
+
+function HubLibrary:SetTitle(text)
+	if self._destroyed or not self.BackGround then
+		return
+	end
+
+	local title = self.BackGround:FindFirstChild("MenuName")
+	if title and title:IsA("TextLabel") then
+		title.Text = tostring(text or "Frank Hub")
+	end
+end
 
 function HubLibrary:SetDiscordCallback(callback)
 	self.OnDiscord = callback
@@ -2365,51 +1365,172 @@ function HubLibrary:SetConfigTab(aba)
 	self.ConfigTab = aba
 end
 
---==================================================
--- DESTROY
---==================================================
-
-function HubLibrary:Destroy()
-	if self._destroyed then
-		return
-	end
-
-	self._destroyed = true
-
-	DesconectarLista(self._connections)
-	DesconectarLista(self._itemConnections)
-
-	for _, aba in ipairs(self.Abas) do
-		if aba then
-			aba._destroyed = true
-
-			if aba.Scroll and aba.Scroll.Parent then
-				aba.Scroll:Destroy()
-			end
-
-			if aba.Btn and aba.Btn.Parent then
-				aba.Btn:Destroy()
-			end
+function HubLibrary:SelecionarAba(aba)
+	if self._destroyed or not aba then return end
+	for _, other in ipairs(self.Abas) do
+		if other.Scroll and other.Scroll.Parent then other.Scroll.Visible = false end
+		if other.Btn and other.Btn.Parent then
+			other.Btn.BackgroundColor3 = Color3.fromRGB(234, 0, 8)
+			other.Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 		end
 	end
+	if aba.Scroll and aba.Scroll.Parent then aba.Scroll.Visible = true end
+	if aba.Btn and aba.Btn.Parent then aba.Btn.BackgroundColor3 = Color3.fromRGB(255, 25, 32) end
+	self.AbaAtiva = aba
+	Callback(aba._onSelected, aba)
+end
 
-	self.Abas = {}
-	self.AbaAtiva = nil
+function HubLibrary:_CreatePage(nome)
+	local page = self.TemplateScrollingFrame:Clone()
+	page.Name = tostring(nome) .. "Scroll"
+	page.Visible = false
+	page.Parent = self.BackGround
+	for _, child in ipairs(page:GetChildren()) do child:Destroy() end
+	page.CanvasPosition = Vector2.new(0, 0)
+	page.CanvasSize = UDim2.new(0, 0, 0, 0)
+	local layout = Instance.new("UIListLayout")
+	layout.Name = "UIListLayout"
+	layout.Padding = UDim.new(0, 6)
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = page
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 5)
+	padding.PaddingBottom = UDim.new(0, 10)
+	padding.PaddingLeft = UDim.new(0, 5)
+	padding.PaddingRight = UDim.new(0, 5)
+	padding.Parent = page
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		if page.Parent then page.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20) end
+	end)
+	return page
+end
 
-	-- Nao destroi a ScreenGui original de fora;
-	-- esta instancia foi criada pela propria biblioteca.
-	if self.ScreenGui and self.ScreenGui.Parent then
-		self.ScreenGui:Destroy()
+function HubLibrary:_CloneTemplate(name, page)
+	local template = self.Templates:FindFirstChild(name)
+	if not template then warn("[Frank Hub] Template ausente:", name); return nil end
+	local clone = template:Clone()
+	clone.Visible = true
+	clone.Parent = page
+	return clone
+end
+
+function HubLibrary:AddTab(nomeDaAba)
+	if self._destroyed then return nil end
+	local template = self.TabButtonsFrame:FindFirstChild("Aba1")
+	if not template or not template:IsA("TextButton") then warn("[Frank Hub] Aba1 nao encontrada"); return nil end
+	template.Visible = false
+	local button = template:Clone()
+	button.Name = tostring(nomeDaAba) .. "Button"
+	button.Text = tostring(nomeDaAba)
+	button.Visible = true
+	button.Parent = self.TabButtonsFrame
+	local page = self:_CreatePage(nomeDaAba)
+	local aba = {ScrollingFrame=page, Scroll=page, Btn=button, _hub=self, _destroyed=false, Name=tostring(nomeDaAba)}
+	table.insert(self.Abas, aba)
+	table.insert(self._connections, button.MouseButton1Click:Connect(function() self:SelecionarAba(aba) end))
+	if #self.Abas == 1 then self:SelecionarAba(aba) end
+	return setmetatable(aba, {__index=HubLibrary})
+end
+
+function HubLibrary:AddToggle(texto, callback, valorInicial)
+	if self._destroyed or not self.Scroll then return nil end
+	local hub = self._hub or self
+	local obj = hub:_CloneTemplate("ToggleTemplate", self.Scroll)
+	if not obj then return nil end
+	local title = obj:FindFirstChild("TitleLabel")
+	local button = obj:FindFirstChild("ToggleButton")
+	if title then title.Text = tostring(texto) end
+	if not button or not button:IsA("TextButton") then obj:Destroy(); return nil end
+	local state = valorInicial == true
+	local function visual()
+		button.BackgroundColor3 = state and Color3.fromRGB(0,255,17) or Color3.fromRGB(0,0,0)
+		local line = button:FindFirstChild("ButtonLine")
+		if line then line.BackgroundColor3 = state and Color3.fromRGB(255,255,255) or Color3.fromRGB(100,100,100) end
 	end
+	local function Set(v, fire) state = v == true; visual(); if fire ~= false then Callback(callback, state) end end
+	visual()
+	table.insert(hub._connections, button.MouseButton1Click:Connect(function() Set(not state, true) end))
+	return {Set=function(_,v) Set(v,true) end, Get=function() return state end, Object=obj, Button=button}
+end
 
-	self.ScreenGui = nil
-	self.BackGround = nil
-	self.TemplateScrollingFrame = nil
-	self.Templates = nil
-	self.TabButtonsFrame = nil
-	self.FixedButtonsFrame = nil
-	self._connections = {}
-	self._itemConnections = {}
+function HubLibrary:AddSlider(texto, valorMin, valorMax, valorPadrao, callback)
+	if self._destroyed or not self.Scroll then return nil end
+	local hub = self._hub or self
+	valorMin = tonumber(valorMin) or 0; valorMax = tonumber(valorMax) or 100; valorPadrao = tonumber(valorPadrao) or valorMin
+	if valorMax < valorMin then valorMin, valorMax = valorMax, valorMin end
+	local value = math.clamp(valorPadrao, valorMin, valorMax)
+	local obj = hub:_CloneTemplate("SliderTemplate", self.Scroll); if not obj then return nil end
+	local title = obj:FindFirstChild("TitleLabel"); local track = obj:FindFirstChild("SliderTrack")
+	local fill = track and track:FindFirstChild("FillButton"); local progress = track and track:FindFirstChild("Progress")
+	if not track or not fill or not progress then obj:Destroy(); return nil end
+	local function visual()
+		local pct = (valorMax == valorMin) and 0 or math.clamp((value-valorMin)/(valorMax-valorMin),0,1)
+		progress.Size = UDim2.new(pct,0,progress.Size.Y.Scale,progress.Size.Y.Offset)
+		fill.Position = UDim2.new(pct,0,fill.Position.Y.Scale,fill.Position.Y.Offset)
+		if title then title.Text = tostring(texto) .. " (" .. tostring(value) .. ")" end
+	end
+	local function setX(x) local w=track.AbsoluteSize.X; if w<=0 then return end; local pct=math.clamp((x-track.AbsolutePosition.X)/w,0,1); value=math.round(valorMin+(valorMax-valorMin)*pct); visual(); Callback(callback,value) end
+	local dragging=false
+	table.insert(hub._connections, track.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true; setX(i.Position.X) end end))
+	table.insert(hub._connections, fill.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true; setX(i.Position.X) end end))
+	table.insert(hub._connections, UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end))
+	table.insert(hub._connections, UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then setX(i.Position.X) end end))
+	visual()
+	return {Set=function(_,v) local n=tonumber(v); if not n then return end; value=math.clamp(math.round(n),valorMin,valorMax); visual(); Callback(callback,value) end, Get=function() return value end, Object=obj, Track=track, FillButton=fill}
+end
+
+function HubLibrary:AddDropdown(texto, opcoes, callback, valorInicial)
+	if self._destroyed or not self.Scroll then return nil end
+	local hub=self._hub or self; opcoes=typeof(opcoes)=="table" and opcoes or {}
+	local value=valorInicial; if value==nil then value=(#opcoes>0 and opcoes[1] or "Select Option...") end
+	local obj=hub:_CloneTemplate("DropdownTemplate", self.Scroll); if not obj then return nil end
+	obj.ClipsDescendants=false
+	local title=obj:FindFirstChild("TitleLabel"); local button=obj:FindFirstChild("Frame")
+	if title then title.Text=tostring(texto) end
+	if not button or not button:IsA("TextButton") then obj:Destroy(); return nil end
+	local selected=button:FindFirstChild("TitleLabel"); local arrow=button:FindFirstChild("TextLabel")
+	local menu=Instance.new("Frame"); menu.Name="ContainerOpcoes"; menu.Size=UDim2.new(0,button.Size.X.Offset,0,math.max(1,#opcoes*30)); menu.Position=UDim2.new(0,button.Position.X.Offset,0,button.Position.Y.Offset+button.Size.Y.Offset+5); menu.BackgroundColor3=Color3.fromRGB(25,25,25); menu.BorderSizePixel=0; menu.Visible=false; menu.ZIndex=100; menu.Parent=obj
+	local layout=Instance.new("UIListLayout"); layout.SortOrder=Enum.SortOrder.LayoutOrder; layout.Parent=menu
+	local openState=false; local originalSize=obj.Size
+	local function updateText() if selected then selected.Text=tostring(value) end; if arrow then arrow.Text=openState and "v" or "^" end end
+	local function close() openState=false; menu.Visible=false; updateText(); TweenService:Create(obj,TweenInfo.new(.16),{Size=originalSize}):Play() end
+	local function open() if #opcoes==0 then return end; openState=true; menu.Visible=true; updateText(); TweenService:Create(obj,TweenInfo.new(.16),{Size=UDim2.new(originalSize.X.Scale,originalSize.X.Offset,0,originalSize.Y.Offset+#opcoes*30+10)}):Play() end
+	updateText()
+	table.insert(hub._connections, button.MouseButton1Click:Connect(function() if openState then close() else open() end end))
+	for n,opt in ipairs(opcoes) do local b=Instance.new("TextButton"); b.Name="Option"..n; b.LayoutOrder=n; b.Size=UDim2.new(1,0,0,30); b.BackgroundColor3=Color3.fromRGB(25,25,25); b.BorderSizePixel=0; b.Text=tostring(opt); b.TextColor3=Color3.fromRGB(255,255,255); b.Font=Enum.Font.SourceSans; b.TextSize=16; b.AutoButtonColor=false; b.ZIndex=101; b.Parent=menu; table.insert(hub._connections,b.MouseButton1Click:Connect(function() value=opt; close(); Callback(callback,opt) end)) end
+	return {Set=function(_,v) value=v; updateText(); Callback(callback,value) end, Get=function() return value end, Open=open, Close=close, Object=obj, Button=button}
+end
+
+function HubLibrary:AddInfoCard(tituloCard, iconeId, listaDeTextos)
+	if self._destroyed or not self.Scroll then return nil end
+	local hub=self._hub or self; local obj=hub:_CloneTemplate("InfoCardTemplate", self.Scroll); if not obj then return nil end
+	local title=obj:FindFirstChild("TitleLabel"); local icon=obj:FindFirstChild("Icon"); local list=obj:FindFirstChild("ListInformations")
+	if title then title.Text=tostring(tituloCard) end
+	if icon and icon:IsA("ImageLabel") and iconeId then icon.Image=tostring(iconeId) end
+	listaDeTextos=typeof(listaDeTextos)=="table" and listaDeTextos or {}
+	if list then local tpl=list:FindFirstChild("InformationTextTemplate"); if tpl and tpl:IsA("TextLabel") then tpl.Visible=false; for _,c in ipairs(list:GetChildren()) do if c:IsA("TextLabel") and c~=tpl then c:Destroy() end end; for n,t in ipairs(listaDeTextos) do local label=tpl:Clone(); label.Name="InformationText"..n; label.Text=tostring(t); label.Visible=true; label.LayoutOrder=n; label.Parent=list end end end
+	return {Object=obj}
+end
+
+function HubLibrary:AddButton(texto, callback)
+	if self._destroyed or not self.Scroll then return nil end
+	local button=Instance.new("TextButton"); button.Name="ButtonTemplate"; button.Size=UDim2.new(0,503,0,50); button.BackgroundColor3=Color3.fromRGB(0,0,0); button.BackgroundTransparency=.45; button.BorderSizePixel=0; button.TextColor3=Color3.fromRGB(255,255,255); button.TextSize=18; button.Text=tostring(texto); button.AutoButtonColor=false; button.Parent=self.Scroll
+	table.insert((self._hub or self)._connections, button.MouseButton1Click:Connect(function() Callback(callback) end))
+	return {Object=button, Button=button}
+end
+
+function HubLibrary:Destroy()
+	if self._destroyed then return end
+	self._destroyed=true
+	for _,c in ipairs(self._connections or {}) do pcall(function() c:Disconnect() end) end
+	for _,c in ipairs(self._featureConnections or {}) do pcall(function() c:Disconnect() end) end
+	for _,aba in ipairs(self.Abas or {}) do if aba then aba._destroyed=true; if aba.Scroll and aba.Scroll.Parent then aba.Scroll:Destroy() end; if aba.Btn and aba.Btn.Parent then aba.Btn:Destroy() end end end
+	self.Abas={}; self.AbaAtiva=nil
+	if self.ScreenGui and self.ScreenGui.Parent then self.ScreenGui:Destroy() end
+	self.ScreenGui=nil; self.BackGround=nil; self.TemplateScrollingFrame=nil; self.Templates=nil; self.TabButtonsFrame=nil; self.FixedButtonsFrame=nil
 end
 
 return HubLibrary
