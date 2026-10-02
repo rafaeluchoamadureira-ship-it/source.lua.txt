@@ -1,40 +1,3 @@
---==================================================
--- FRANK HUB LIBRARY
--- INTERFACE EXTRAIDA DO MenuHub.rbxm
---
--- Esta versao:
--- 1) recria a interface enviada pelo usuario no PlayerGui;
--- 2) usa os templates desenhados manualmente no .rbxm;
--- 3) conecta AddTab/AddToggle/AddSlider/AddDropdown/AddInfoCard/AddButton;
--- 4) funciona como loader externo: nao depende de ModuleScript no jogo alvo.
---
--- Estrutura criada:
--- Menu Hub [ScreenGui]
--- └─ BackGround
---    ├─ BackGroundTop
---    ├─ TabButtonsFrame
---    │  ├─ UIListLayout
---    │  └─ Aba1
---    ├─ ScrollingFrame
---    │  ├─ UIListLayout
---    │  └─ Templates
---    │     ├─ InfoCardTemplate
---    │     ├─ ToggleTemplate
---    │     ├─ DropdownTemplate
---    │     └─ SliderTemplate
---    ├─ Close
---    ├─ TabButtonsFrame
---    │  ├─ UIListLayout
---    │  ├─ DiscordButton
---    │  └─ ConfigButton
---    └─ MenuName
---
--- Observacao:
--- Alguns valores do .rbxm original possuem offsets negativos.
--- Eles sao mantidos abaixo para preservar o desenho enviado.
--- A ScreenGui e ativada em runtime para que a interface apareca.
---==================================================
-
 local HubLibrary = {}
 HubLibrary.__index = HubLibrary
 
@@ -45,99 +8,93 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 --==================================================
--- CONSTANTES VISUAIS
+-- HUBLIBRARY ADAPTADA PARA A INTERFACE FEITA A MAO
+--
+-- Hierarquia esperada:
+--
+-- Menu Hub [ScreenGui]
+-- └─ BackGround [Frame]
+--    ├─ BackGroundTop [Frame]
+--    ├─ TabButtonsFrame [Frame]
+--    │  ├─ UIListLayout
+--    │  └─ Aba1 [TextButton]
+--    ├─ ScrollingFrame [ScrollingFrame]
+--    │  ├─ UIListLayout
+--    │  └─ Templates [Folder]
+--    │     ├─ InfoCardTemplate [Frame]
+--    │     ├─ ToggleTemplate [Frame]
+--    │     ├─ DropdownTemplate [Frame]
+--    │     └─ SliderTemplate [Frame]
+--    ├─ Close [TextButton]
+--    ├─ TabButtonsFrame [Frame]
+--    │  ├─ UIListLayout
+--    │  ├─ DiscordButton [TextButton]
+--    │  └─ ConfigButton [TextButton]
+--    └─ MenuName [TextLabel]
+--
+-- Observacao:
+-- Ha DOIS TabButtonsFrame com o mesmo nome.
+-- A biblioteca encontra o primeiro pela presenca de "Aba1"
+-- e trata o outro como a barra de botoes fixos.
+--
+-- Os templates existentes no Studio sao usados como base visual.
+-- A biblioteca NAO recria o design dos controles.
 --==================================================
 
-local COR_FUNDO = Color3.fromRGB(0, 0, 0)
-local COR_TOPO = Color3.fromRGB(234, 0, 8)
+local COR_FUNDO = Color3.fromRGB(25, 25, 25)
+local COR_TOPO = Color3.fromRGB(215, 20, 20)
 local COR_BORDA = Color3.fromRGB(0, 0, 0)
-local COR_CARD = Color3.fromRGB(0, 0, 0)
-local COR_CONTROLE = Color3.fromRGB(0, 0, 0)
-local COR_VERDE = Color3.fromRGB(0, 255, 17)
 
-local COR_TAB_NORMAL = Color3.fromRGB(234, 0, 8)
-local COR_TAB_ATIVA = Color3.fromRGB(255, 25, 32)
-local COR_TEXTO = Color3.fromRGB(255, 255, 255)
+local COR_CARD = Color3.fromRGB(35, 35, 35)
+local COR_CONTROLE = Color3.fromRGB(20, 20, 20)
+local COR_VERDE = Color3.fromRGB(0, 235, 60)
+
+local TAMANHO_BORDA = 3
+
+local COR_TAB_NORMAL = Color3.fromRGB(40, 40, 40)
+local COR_TAB_TEXTO_NORMAL = Color3.fromRGB(200, 200, 200)
+local COR_TAB_TEXTO_ATIVA = Color3.fromRGB(255, 255, 255)
 
 --==================================================
--- FUNCOES AUXILIARES
+-- AUXILIARES
 --==================================================
 
-local function UDim2Exact(xs, xo, ys, yo)
-	return UDim2.new(xs, xo, ys, yo)
-end
-
-local function UDimExact(scale, offset)
-	return UDim.new(scale, offset)
-end
-
-local function Color3Exact(r, g, b)
-	return Color3.new(r, g, b)
-end
-
-local function SetSafe(instance, property, value)
-	if instance == nil then
-		return
-	end
-
-	pcall(function()
-		instance[property] = value
-	end)
-end
-
-local function AplicarBorda(parent, thickness, color, borderPosition)
+local function AplicarBorda(parent, espessura)
 	if not parent then
 		return nil
 	end
 
 	local stroke = parent:FindFirstChildOfClass("UIStroke")
 
-	if not stroke then
-		stroke = Instance.new("UIStroke")
-		stroke.Parent = parent
+	if stroke then
+		if espessura then
+			stroke.Thickness = espessura
+		end
+		return stroke
 	end
 
-	stroke.Thickness = thickness or 3
-	stroke.Color = color or COR_BORDA
-
-	if borderPosition ~= nil then
-		SetSafe(stroke, "BorderStrokePosition", borderPosition)
-	end
-
-	SetSafe(stroke, "ApplyStrokeMode", Enum.ApplyStrokeMode.Border)
-	SetSafe(stroke, "LineJoinMode", Enum.LineJoinMode.Round)
-
-	return stroke
-end
-
-local function CriarStroke(parent, name, thickness, color, applyMode, borderPosition, lineJoin)
-	local stroke = Instance.new("UIStroke")
-	stroke.Name = name or "UIStroke"
-	stroke.Thickness = thickness or 3
-	stroke.Color = color or COR_BORDA
+	stroke = Instance.new("UIStroke")
+	stroke.Thickness = espessura or TAMANHO_BORDA
+	stroke.Color = COR_BORDA
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = parent
 
-	if applyMode ~= nil then
-		SetSafe(stroke, "ApplyStrokeMode", applyMode)
-	end
-
-	if borderPosition ~= nil then
-		SetSafe(stroke, "BorderStrokePosition", borderPosition)
-	end
-
-	if lineJoin ~= nil then
-		SetSafe(stroke, "LineJoinMode", lineJoin)
-	end
-
 	return stroke
 end
 
-local function CriarCorner(parent, radius)
-	local corner = Instance.new("UICorner")
-	corner.Name = "UICorner"
+local function Arredondar(parent, raio)
+	if not parent then
+		return nil
+	end
 
-	local r = radius or 5
-	corner.CornerRadius = UDim.new(0, r)
+	local corner = parent:FindFirstChildOfClass("UICorner")
+
+	if corner then
+		return corner
+	end
+
+	corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, raio or 6)
 	corner.Parent = parent
 
 	return corner
@@ -151,32 +108,55 @@ local function ExecutarCallback(callback, ...)
 	local args = table.pack(...)
 
 	task.spawn(function()
-		local ok, err = pcall(function()
+		local sucesso, erro = pcall(function()
 			callback(table.unpack(args, 1, args.n))
 		end)
 
-		if not ok then
-			warn("[Frank Hub] Callback:", err)
+		if not sucesso then
+			warn("[HubLibrary] Erro no callback:", erro)
 		end
 	end)
 end
 
-local function Conectar(lista, signal, callback)
+local function NormalizarImagem(id)
+	if id == nil then
+		return "rbxassetid://0"
+	end
+
+	local texto = tostring(id)
+
+	if texto == "" then
+		return "rbxassetid://0"
+	end
+
+	if string.find(texto, "rbxassetid://", 1, true) then
+		return texto
+	end
+
+	if string.find(texto, "rbxasset.com", 1, true) then
+		return texto
+	end
+
+	return "rbxassetid://" .. texto
+end
+
+local function Conectar(connections, signal, callback)
 	if not signal then
 		return nil
 	end
 
 	local connection = signal:Connect(callback)
-	table.insert(lista, connection)
+	table.insert(connections, connection)
+
 	return connection
 end
 
-local function DesconectarLista(lista)
-	if not lista then
+local function DesconectarLista(connections)
+	if not connections then
 		return
 	end
 
-	for _, connection in ipairs(lista) do
+	for _, connection in ipairs(connections) do
 		if typeof(connection) == "RBXScriptConnection" then
 			pcall(function()
 				connection:Disconnect()
@@ -184,1251 +164,304 @@ local function DesconectarLista(lista)
 		end
 	end
 
-	table.clear(lista)
+	table.clear(connections)
 end
 
-local function FontFromFamily(family, weight, italic)
-	local style = italic and Enum.FontStyle.Italic or Enum.FontStyle.Normal
-	local fontWeight
+local function EncontrarTabFrame(backGround)
+	local candidatos = {}
 
-	if (weight or 400) >= 900 then
-		fontWeight = Enum.FontWeight.Black
-	elseif (weight or 400) >= 700 then
-		fontWeight = Enum.FontWeight.Bold
-	elseif (weight or 400) >= 600 then
-		fontWeight = Enum.FontWeight.SemiBold
-	else
-		fontWeight = Enum.FontWeight.Regular
+	for _, child in ipairs(backGround:GetChildren()) do
+		if child:IsA("Frame") and child.Name == "TabButtonsFrame" then
+			table.insert(candidatos, child)
+		end
 	end
 
-	local ok, result = pcall(function()
-		return Font.new(family, fontWeight, style)
-	end)
-
-	if ok then
-		return result
+	for _, frame in ipairs(candidatos) do
+		if frame:FindFirstChild("Aba1") then
+			return frame
+		end
 	end
 
-	return Font.new("rbxasset://fonts/families/Arial.json", fontWeight, style)
+	return candidatos[1]
 end
 
-local function SetTextFont(instance, family, weight, italic)
-	if not instance then
-		return
-	end
-
-	local font = FontFromFamily(family, weight, italic)
-
-	SetSafe(instance, "FontFace", font)
-
-	-- Fallback para ambientes que ainda expõem Font.
-	if family:find("GothamSSm", 1, true) then
-		SetSafe(instance, "Font", Enum.Font.GothamBold)
-	elseif weight >= 700 then
-		SetSafe(instance, "Font", italic and Enum.Font.SourceSansItalic or Enum.Font.SourceSansBold)
-	else
-		SetSafe(instance, "Font", Enum.Font.SourceSans)
-	end
-end
-
-local function SetLabelProps(label, props)
-	for property, value in pairs(props) do
-		SetSafe(label, property, value)
-	end
-end
-
-local function EncontrarFilho(parent, name, className)
-	if not parent then
-		return nil
-	end
-
-	local child = parent:FindFirstChild(name)
-
-	if child and (not className or child:IsA(className)) then
-		return child
+local function EncontrarFrameFixos(backGround, tabFrame)
+	for _, child in ipairs(backGround:GetChildren()) do
+		if child:IsA("Frame")
+			and child.Name == "TabButtonsFrame"
+			and child ~= tabFrame then
+			return child
+		end
 	end
 
 	return nil
 end
 
-local function EncontrarPrimeiro(parent, className)
-	if not parent then
+local function EncontrarTemplate(templates, nome)
+	if not templates then
 		return nil
 	end
 
-	return parent:FindFirstChildWhichIsA(className, true)
-end
+	local object = templates:FindFirstChild(nome)
 
-local function DestruirSeExistir(parent, name)
-	local old = parent and parent:FindFirstChild(name)
-	if old then
-		old:Destroy()
-	end
-end
-
---==================================================
--- CONSTRUCAO EXATA DA INTERFACE DO RBXM
---==================================================
-
-function HubLibrary._CriarInterface()
-	local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-	-- Remove apenas uma copia anterior feita pela biblioteca.
-	local antiga = PlayerGui:FindFirstChild("Menu Hub")
-	if antiga then
-		antiga:Destroy()
+	if object and object:IsA("GuiObject") then
+		return object
 	end
 
-	--==================================================
-	-- ScreenGui
-	--==================================================
+	return nil
+end
 
-	local ScreenGui = Instance.new("ScreenGui")
-	ScreenGui.Name = "Menu Hub"
-	ScreenGui.ResetOnSpawn = true
-	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local function EncontrarTitulo(template)
+	if not template then
+		return nil
+	end
 
-	-- O arquivo enviado estava com Enabled=false.
-	-- Para o teste externo a interface precisa ficar visivel.
-	ScreenGui.Enabled = true
-	ScreenGui.Parent = PlayerGui
+	local title = template:FindFirstChild("TitleLabel")
 
-	--==================================================
-	-- BackGround
-	--==================================================
+	if title and title:IsA("TextLabel") then
+		return title
+	end
 
-	local BackGround = Instance.new("Frame")
-	BackGround.Name = "BackGround"
-	BackGround.Position = UDim2Exact(
-		0.306561142206192,
-		0,
-		0.1720733493566513,
-		0
-	)
-	BackGround.Size = UDim2Exact(0, 534, 0, 488)
-	BackGround.BackgroundColor3 = Color3Exact(0, 0, 0)
-	BackGround.BackgroundTransparency = 0.5
-	BackGround.BorderSizePixel = 0
-	BackGround.Visible = true
-	BackGround.ZIndex = 1
-	BackGround.Parent = ScreenGui
+	return template:FindFirstChildWhichIsA("TextLabel", true)
+end
 
-	CriarCorner(BackGround, 5)
-	CriarStroke(BackGround, "UIStroke", 3, COR_BORDA, Enum.ApplyStrokeMode.Border, Enum.BorderStrokePosition.Outer)
+local function EncontrarToggleButton(template)
+	if not template then
+		return nil
+	end
 
-	--==================================================
-	-- BackGroundTop
-	--==================================================
+	local button = template:FindFirstChild("ToggleButton")
 
-	local BackGroundTop = Instance.new("Frame")
-	BackGroundTop.Name = "BackGroundTop"
-	BackGroundTop.Position = UDim2Exact(
-		0,
-		0,
-		-0.013656365685164928,
-		0
-	)
-	BackGroundTop.Size = UDim2Exact(0, 534, 0, -57)
-	BackGroundTop.BackgroundColor3 = Color3Exact(
-		234 / 255,
-		0,
-		8 / 255
-	)
-	BackGroundTop.BackgroundTransparency = 0
-	BackGroundTop.BorderSizePixel = 0
-	BackGroundTop.Parent = BackGround
+	if button and button:IsA("TextButton") then
+		return button
+	end
 
-	CriarStroke(
-		BackGroundTop,
-		"UIStroke",
-		3,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	return template:FindFirstChildWhichIsA("TextButton", true)
+end
 
-	-- Decorative Frame named UIStroke.
-	local TopDecoration = Instance.new("Frame")
-	TopDecoration.Name = "UIStroke"
-	TopDecoration.Position = UDim2Exact(
-		-0.00187265919521451,
-		0,
-		1,
-		0
-	)
-	TopDecoration.Size = UDim2Exact(0, 536, 0, 6)
-	TopDecoration.BackgroundColor3 = Color3Exact(
-		0.33725491166114807,
-		0,
-		0.01568627543747425
-	)
-	TopDecoration.BackgroundTransparency = 0
-	TopDecoration.BorderSizePixel = 0
-	TopDecoration.Parent = BackGroundTop
+local function EncontrarDropdownButton(template)
+	if not template then
+		return nil
+	end
 
-	CriarStroke(
-		TopDecoration,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	-- Na hierarquia informada, o TextButton se chama "Frame".
+	local button = template:FindFirstChild("Frame")
 
-	--==================================================
-	-- Primeiro TabButtonsFrame
-	--==================================================
+	if button and button:IsA("TextButton") then
+		return button
+	end
 
-	local TabButtonsFrame = Instance.new("Frame")
-	TabButtonsFrame.Name = "TabButtonsFrame"
-	TabButtonsFrame.Position = UDim2Exact(
-		-0.3333333432674408,
-		0,
-		0.026639344170689583,
-		0
-	)
-	TabButtonsFrame.Size = UDim2Exact(0, 169, 0, 461)
-	TabButtonsFrame.BackgroundTransparency = 1
-	TabButtonsFrame.Parent = BackGround
+	return template:FindFirstChildWhichIsA("TextButton", true)
+end
 
-	local TabLayout = Instance.new("UIListLayout")
-	TabLayout.Name = "UIListLayout"
-	TabLayout.Padding = UDimExact(0, 75)
-	TabLayout.FillDirection = Enum.FillDirection.Horizontal
-	TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	TabLayout.Parent = TabButtonsFrame
+local function EncontrarDropdownTexto(button)
+	if not button then
+		return nil
+	end
 
-	-- Aba1: template desenhado a mao.
-	local Aba1 = Instance.new("TextButton")
-	Aba1.Name = "Aba1"
-	Aba1.Position = UDim2Exact(
-		0.08875739574432373,
-		0,
-		0.12364425510168076,
-		0
-	)
-	Aba1.Size = UDim2Exact(0, 153, 0, -57)
-	Aba1.BackgroundColor3 = Color3Exact(
-		234 / 255,
-		0,
-		8 / 255
-	)
-	Aba1.BorderSizePixel = 0
-	Aba1.Text = "Farm"
-	Aba1.TextColor3 = Color3Exact(1, 1, 1)
-	Aba1.TextSize = 25
-	Aba1.TextScaled = false
-	Aba1.TextWrapped = true
-	Aba1.TextXAlignment = Enum.TextXAlignment.Right
-	Aba1.TextYAlignment = Enum.TextYAlignment.Center
-	Aba1.AutoButtonColor = true
-	Aba1.Visible = false
-	Aba1.ZIndex = 1
-	SetTextFont(
-		Aba1,
-		"rbxasset://fonts/families/LegacyArial.json",
-		700,
-		false
-	)
-	Aba1.Parent = TabButtonsFrame
+	local label = button:FindFirstChild("TextLabel")
 
-	CriarStroke(
-		Aba1,
-		"UIStroke",
-		3,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	if label and label:IsA("TextLabel") then
+		return label
+	end
 
-	local AbaDecoration = Instance.new("Frame")
-	AbaDecoration.Name = "UiStroke"
-	AbaDecoration.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	AbaDecoration.Size = UDim2Exact(0, 503, 0, 50)
-	AbaDecoration.BackgroundColor3 = Color3Exact(
-		1,
-		1,
-		1
-	)
-	AbaDecoration.BackgroundTransparency = 1
-	AbaDecoration.BorderSizePixel = 0
-	AbaDecoration.Parent = Aba1
-
-	CriarStroke(
-		AbaDecoration,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	CriarStroke(
-		Aba1,
-		"UIStrokeTest",
-		3,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	--==================================================
-	-- ScrollingFrame base
-	--==================================================
-
-	local ScrollingFrame = Instance.new("ScrollingFrame")
-	ScrollingFrame.Name = "ScrollingFrame"
-	ScrollingFrame.Position = UDim2Exact(
-		0.018726591020822525,
-		0,
-		0.026639344170689583,
-		0
-	)
-	ScrollingFrame.Size = UDim2Exact(0, 524, 0, 464)
-	ScrollingFrame.BackgroundColor3 = Color3Exact(1, 1, 1)
-	ScrollingFrame.BackgroundTransparency = 1
-	ScrollingFrame.BorderSizePixel = 0
-	ScrollingFrame.ScrollBarThickness = 6
-	ScrollingFrame.ScrollBarImageColor3 = Color3Exact(0, 0, 0)
-	ScrollingFrame.ScrollBarImageTransparency = 0
-	ScrollingFrame.CanvasSize = UDim2Exact(0, 0, 2, 0)
-	ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.None
-	ScrollingFrame.ScrollingDirection = Enum.ScrollingDirection.XY
-	ScrollingFrame.Visible = false
-	ScrollingFrame.ZIndex = 1
-	ScrollingFrame.Parent = BackGround
-
-	local ScrollLayout = Instance.new("UIListLayout")
-	ScrollLayout.Name = "UIListLayout"
-	ScrollLayout.FillDirection = Enum.FillDirection.Vertical
-	ScrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	ScrollLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	ScrollLayout.Padding = UDimExact(0, 6)
-	ScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	ScrollLayout.Parent = ScrollingFrame
-
-	--==================================================
-	-- Templates
-	--==================================================
-
-	local Templates = Instance.new("Folder")
-	Templates.Name = "Templates"
-	Templates.Parent = ScrollingFrame
-
-	-- Container visual dos templates nao aparece.
-	local function PrepareTemplate(template)
-		if template:IsA("GuiObject") then
-			template.Visible = false
+	for _, child in ipairs(button:GetChildren()) do
+		if child:IsA("TextLabel") then
+			return child
 		end
 	end
 
-	--==================================================
-	-- InfoCardTemplate
-	--==================================================
-
-	local InfoCardTemplate = Instance.new("Frame")
-	InfoCardTemplate.Name = "InfoCardTemplate"
-	InfoCardTemplate.Position = UDim2Exact(
-		0,
-		0,
-		0.17213115096092224,
-		0
-	)
-	InfoCardTemplate.Size = UDim2Exact(0, 503, 0, 194)
-	InfoCardTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	InfoCardTemplate.BackgroundTransparency = 0.45
-	InfoCardTemplate.BorderSizePixel = 0
-	InfoCardTemplate.Visible = false
-	InfoCardTemplate.Parent = Templates
-
-	CriarStroke(
-		InfoCardTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	local Icon = Instance.new("ImageLabel")
-	Icon.Name = "Icon"
-	Icon.Position = UDim2Exact(
-		0.025844929739832878,
-		0,
-		0.31778204441070557,
-		0
-	)
-	Icon.Size = UDim2Exact(0, 100, 0, 100)
-	Icon.BackgroundColor3 = Color3Exact(1, 1, 1)
-	Icon.BackgroundTransparency = 0
-	Icon.BorderSizePixel = 0
-	Icon.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
-	Icon.ImageColor3 = Color3Exact(1, 1, 1)
-	Icon.ImageTransparency = 0
-	Icon.ScaleType = Enum.ScaleType.Stretch
-	Icon.Visible = true
-	Icon.ZIndex = 1
-	Icon.Parent = InfoCardTemplate
-
-	CriarCorner(Icon, 5)
-	CriarStroke(
-		Icon,
-		"UIStroke",
-		2,
-		Color3Exact(0.8313726186752319, 0, 1),
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	local InfoTitle = Instance.new("TextLabel")
-	InfoTitle.Name = "TitleLabel"
-	InfoTitle.Position = UDim2Exact(
-		0.049701787531375885,
-		0,
-		0.03954795002937317,
-		0
-	)
-	InfoTitle.Size = UDim2Exact(0, 188, 0, 38)
-	InfoTitle.BackgroundTransparency = 1
-	InfoTitle.Text = "Egg Predictor"
-	InfoTitle.TextColor3 = Color3Exact(1, 1, 1)
-	InfoTitle.TextSize = 14
-	InfoTitle.TextScaled = true
-	InfoTitle.TextWrapped = true
-	InfoTitle.TextXAlignment = Enum.TextXAlignment.Right
-	InfoTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		InfoTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	InfoTitle.Parent = InfoCardTemplate
-
-	local ListInformations = Instance.new("Frame")
-	ListInformations.Name = "ListInformations"
-	ListInformations.Position = UDim2Exact(
-		0.2425447255373001,
-		0,
-		0.23567593097686768,
-		0
-	)
-	ListInformations.Size = UDim2Exact(0, 121, 0, 129)
-	ListInformations.BackgroundTransparency = 1
-	ListInformations.Parent = InfoCardTemplate
-
-	local InfoLayout = Instance.new("UIListLayout")
-	InfoLayout.Name = "UIListLayout"
-	InfoLayout.FillDirection = Enum.FillDirection.Vertical
-	InfoLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	InfoLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	InfoLayout.Padding = UDimExact(0, 6)
-	InfoLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	InfoLayout.Parent = ListInformations
-
-	local InformationTextTemplate = Instance.new("TextLabel")
-	InformationTextTemplate.Name = "InformationTextTemplate"
-	InformationTextTemplate.Position = UDim2Exact(
-		0.22465208172798157,
-		0,
-		0.21468926966190338,
-		0
-	)
-	InformationTextTemplate.Size = UDim2Exact(0, 118, 0, 25)
-	InformationTextTemplate.BackgroundTransparency = 1
-	InformationTextTemplate.Text = "3.03x"
-	InformationTextTemplate.TextColor3 = Color3Exact(1, 1, 1)
-	InformationTextTemplate.TextSize = 20
-	InformationTextTemplate.TextScaled = false
-	InformationTextTemplate.TextWrapped = true
-	InformationTextTemplate.TextXAlignment = Enum.TextXAlignment.Right
-	InformationTextTemplate.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		InformationTextTemplate,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	InformationTextTemplate.Parent = ListInformations
-
-	--==================================================
-	-- ToggleTemplate
-	--==================================================
-
-	local ToggleTemplate = Instance.new("Frame")
-	ToggleTemplate.Name = "ToggleTemplate"
-	ToggleTemplate.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	ToggleTemplate.Size = UDim2Exact(0, 503, 0, 50)
-	ToggleTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	ToggleTemplate.BackgroundTransparency = 0.45
-	ToggleTemplate.BorderSizePixel = 0
-	ToggleTemplate.Visible = false
-	ToggleTemplate.Parent = Templates
-
-	CriarStroke(
-		ToggleTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	local ToggleTitle = Instance.new("TextLabel")
-	ToggleTitle.Name = "TitleLabel"
-	ToggleTitle.Position = UDim2Exact(
-		0.013916500844061375,
-		0,
-		0,
-		0
-	)
-	ToggleTitle.Size = UDim2Exact(0, 200, 0, 50)
-	ToggleTitle.BackgroundTransparency = 1
-	ToggleTitle.Text = "Auto Steal"
-	ToggleTitle.TextColor3 = Color3Exact(1, 1, 1)
-	ToggleTitle.TextSize = 14
-	ToggleTitle.TextScaled = true
-	ToggleTitle.TextWrapped = true
-	ToggleTitle.TextXAlignment = Enum.TextXAlignment.Right
-	ToggleTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		ToggleTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	ToggleTitle.Parent = ToggleTemplate
-
-	local ToggleButton = Instance.new("TextButton")
-	ToggleButton.Name = "ToggleButton"
-	ToggleButton.Position = UDim2Exact(
-		0.8409543037414551,
-		0,
-		0.16279174387454987,
-		0
-	)
-	ToggleButton.Size = UDim2Exact(0, 75, 0, 35)
-	ToggleButton.BackgroundColor3 = Color3Exact(0, 0, 0)
-	ToggleButton.BackgroundTransparency = 0.4
-	ToggleButton.BorderSizePixel = 0
-	ToggleButton.Text = ""
-	ToggleButton.TextColor3 = Color3Exact(
-		0.10588236153125763,
-		0.16470588743686676,
-		0.20784315466880798
-	)
-	ToggleButton.TextSize = 8
-	ToggleButton.AutoButtonColor = true
-	ToggleButton.ZIndex = 1
-	ToggleButton.Parent = ToggleTemplate
-
-	CriarStroke(
-		ToggleButton,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Inner
-	)
-
-	local ButtonLine = Instance.new("Frame")
-	ButtonLine.Name = "ButtonLine"
-	ButtonLine.Position = UDim2Exact(
-		0.097,
-		0,
-		0.19,
-		0
-	)
-	ButtonLine.Size = UDim2Exact(0, 20, 0, 21)
-	ButtonLine.BackgroundColor3 = Color3Exact(1, 1, 1)
-	ButtonLine.BorderSizePixel = 0
-	ButtonLine.Parent = ToggleButton
-
-	--==================================================
-	-- DropdownTemplate
-	--==================================================
-
-	local DropdownTemplate = Instance.new("Frame")
-	DropdownTemplate.Name = "DropdownTemplate"
-	DropdownTemplate.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	DropdownTemplate.Size = UDim2Exact(0, 503, 0, 50)
-	DropdownTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	DropdownTemplate.BackgroundTransparency = 0.45
-	DropdownTemplate.BorderSizePixel = 0
-	DropdownTemplate.Visible = false
-	DropdownTemplate.Parent = Templates
-
-	CriarStroke(
-		DropdownTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	local DropdownTitle = Instance.new("TextLabel")
-	DropdownTitle.Name = "TitleLabel"
-	DropdownTitle.Position = UDim2Exact(
-		0.025844929739832878,
-		0,
-		0,
-		0
-	)
-	DropdownTitle.Size = UDim2Exact(0, 200, 0, 50)
-	DropdownTitle.BackgroundTransparency = 1
-	DropdownTitle.Text = "Target Areas"
-	DropdownTitle.TextColor3 = Color3Exact(1, 1, 1)
-	DropdownTitle.TextSize = 14
-	DropdownTitle.TextScaled = true
-	DropdownTitle.TextWrapped = true
-	DropdownTitle.TextXAlignment = Enum.TextXAlignment.Right
-	DropdownTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		DropdownTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	DropdownTitle.Parent = DropdownTemplate
-
-	local DropdownButton = Instance.new("TextButton")
-	DropdownButton.Name = "Frame"
-	DropdownButton.Position = UDim2Exact(
-		0.6421471238136292,
-		0,
-		0.16279174387454987,
-		0
-	)
-	DropdownButton.Size = UDim2Exact(0, 175, 0, 35)
-	DropdownButton.BackgroundColor3 = Color3Exact(0, 0, 0)
-	DropdownButton.BackgroundTransparency = 0.4
-	DropdownButton.BorderSizePixel = 0
-	DropdownButton.Text = ""
-	DropdownButton.TextSize = 8
-	DropdownButton.TextXAlignment = Enum.TextXAlignment.Right
-	DropdownButton.TextYAlignment = Enum.TextYAlignment.Center
-	DropdownButton.Parent = DropdownTemplate
-
-	CriarStroke(
-		DropdownButton,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Inner
-	)
-
-	local DropdownText = Instance.new("TextLabel")
-	DropdownText.Name = "TextLabel"
-	DropdownText.Position = UDim2Exact(
-		0.8278145790100098,
-		0,
-		0.2571428716182709,
-		0
-	)
-	DropdownText.Size = UDim2Exact(0, 19, 0, 16)
-	DropdownText.BackgroundTransparency = 1
-	DropdownText.Text = "^"
-	DropdownText.TextColor3 = Color3Exact(
-		0,
-		0.7411764860153198,
-		0.05098039656877518
-	)
-	DropdownText.TextSize = 30
-	DropdownText.TextScaled = false
-	DropdownText.TextWrapped = true
-	DropdownText.TextXAlignment = Enum.TextXAlignment.Right
-	DropdownText.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		DropdownText,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	DropdownText.Parent = DropdownButton
-
-	local SelectedLabel = Instance.new("TextLabel")
-	SelectedLabel.Name = "TitleLabel"
-	SelectedLabel.Position = UDim2Exact(
-		0.046091657131910324,
-		0,
-		0,
-		0
-	)
-	SelectedLabel.Size = UDim2Exact(0, 133, 0, 35)
-	SelectedLabel.BackgroundTransparency = 1
-	SelectedLabel.Text = "Selected 12"
-	SelectedLabel.TextColor3 = Color3Exact(1, 1, 1)
-	SelectedLabel.TextSize = 20
-	SelectedLabel.TextScaled = false
-	SelectedLabel.TextWrapped = true
-	SelectedLabel.TextXAlignment = Enum.TextXAlignment.Right
-	SelectedLabel.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		SelectedLabel,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	SelectedLabel.Parent = DropdownButton
-
-	--==================================================
-	-- SliderTemplate
-	--==================================================
-
-	local SliderTemplate = Instance.new("Frame")
-	SliderTemplate.Name = "SliderTemplate"
-	SliderTemplate.Position = UDim2Exact(
-		0.010414415039122105,
-		0,
-		0.032087452709674835,
-		0
-	)
-	SliderTemplate.Size = UDim2Exact(0, 503, 0, 50)
-	SliderTemplate.BackgroundColor3 = Color3Exact(0, 0, 0)
-	SliderTemplate.BackgroundTransparency = 0.45
-	SliderTemplate.BorderSizePixel = 0
-	SliderTemplate.Visible = false
-	SliderTemplate.Parent = Templates
-
-	CriarStroke(
-		SliderTemplate,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
-
-	local SliderTitle = Instance.new("TextLabel")
-	SliderTitle.Name = "TitleLabel"
-	SliderTitle.Position = UDim2Exact(
-		0.025844929739832878,
-		0,
-		0,
-		0
-	)
-	SliderTitle.Size = UDim2Exact(0, 200, 0, 50)
-	SliderTitle.BackgroundTransparency = 1
-	SliderTitle.Text = "Min Value To Steal"
-	SliderTitle.TextColor3 = Color3Exact(1, 1, 1)
-	SliderTitle.TextSize = 14
-	SliderTitle.TextScaled = true
-	SliderTitle.TextWrapped = true
-	SliderTitle.TextXAlignment = Enum.TextXAlignment.Right
-	SliderTitle.TextYAlignment = Enum.TextYAlignment.Center
-	SetTextFont(
-		SliderTitle,
-		"rbxasset://fonts/families/SourceSansPro.json",
-		700,
-		false
-	)
-	SliderTitle.Parent = SliderTemplate
-
-	local SliderTrack = Instance.new("Frame")
-	SliderTrack.Name = "SliderTrack"
-	SliderTrack.Position = UDim2Exact(
-		0.570576548576355,
-		0,
-		0.2800000011920929,
-		0
-	)
-	SliderTrack.Size = UDim2Exact(0, 199, 0, 22)
-	SliderTrack.BackgroundColor3 = Color3Exact(0, 0, 0)
-	SliderTrack.BackgroundTransparency = 0.4
-	SliderTrack.BorderSizePixel = 0
-	SliderTrack.Parent = SliderTemplate
-
-	CriarStroke(
-		SliderTrack,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Inner
-	)
-
-	local FillButton = Instance.new("TextButton")
-	FillButton.Name = "FillButton"
-	FillButton.Position = UDim2Exact(
-		0.588,
-		0,
-		-0.095,
-		0
-	)
-	FillButton.Size = UDim2Exact(0, 23, 0, 28)
-	FillButton.BackgroundColor3 = Color3Exact(1, 1, 1)
-	FillButton.BorderSizePixel = 0
-	FillButton.Text = ""
-	FillButton.AutoButtonColor = true
-	FillButton.ZIndex = 2
-	FillButton.Parent = SliderTrack
-
-	local Progress = Instance.new("Frame")
-	Progress.Name = "Progress"
-	Progress.Position = UDim2Exact(
-		0.0011473995400592685,
-		0,
-		0.052727438509464264,
-		0
-	)
-	Progress.Size = UDim2Exact(0, 128, 0, 22)
-	Progress.BackgroundColor3 = Color3Exact(
-		0,
-		1,
-		0.06666667014360428
-	)
-	Progress.BorderSizePixel = 0
-	Progress.Parent = SliderTrack
-
-	-- Garante a ordem correta na pasta.
-	InfoCardTemplate.LayoutOrder = 1
-	ToggleTemplate.LayoutOrder = 2
-	DropdownTemplate.LayoutOrder = 3
-	SliderTemplate.LayoutOrder = 4
-
-	return ScreenGui
+	return nil
 end
 
---==================================================
--- HELPERS DA INSTANCIA
---==================================================
-
-function HubLibrary:_GetRoot()
-	if self._destroyed then
-		return nil
+local function EsconderTemplates(templates)
+	if not templates then
+		return
 	end
 
-	return self.ScreenGui
+	for _, child in ipairs(templates:GetChildren()) do
+		if child:IsA("GuiObject") then
+			child.Visible = false
+		end
+	end
 end
 
-function HubLibrary:_GetTemplates()
-	return self.Templates
+local function CopiarAparenciaScrolling(origem, destino)
+	destino.Size = origem.Size
+	destino.Position = origem.Position
+	destino.AnchorPoint = origem.AnchorPoint
+	destino.BackgroundColor3 = origem.BackgroundColor3
+	destino.BackgroundTransparency = origem.BackgroundTransparency
+	destino.BorderColor3 = origem.BorderColor3
+	destino.BorderSizePixel = origem.BorderSizePixel
+	destino.ClipsDescendants = origem.ClipsDescendants
+	destino.LayoutOrder = origem.LayoutOrder
+	destino.ScrollBarImageColor3 = origem.ScrollBarImageColor3
+	destino.ScrollBarImageTransparency = origem.ScrollBarImageTransparency
+	destino.ScrollBarThickness = origem.ScrollBarThickness
+	destino.ScrollBarImageTransparency = origem.ScrollBarImageTransparency
+	destino.ScrollingDirection = origem.ScrollingDirection
+	destino.AutomaticCanvasSize = Enum.AutomaticSize.None
+	destino.CanvasSize = UDim2.new(0, 0, 0, 0)
+	destino.Visible = false
+
+	pcall(function()
+		destino.BottomImage = origem.BottomImage
+	end)
+
+	pcall(function()
+		destino.MidImage = origem.MidImage
+	end)
+
+	pcall(function()
+		destino.TopImage = origem.TopImage
+	end)
 end
 
-function HubLibrary:_CreatePage(nome)
+local function CriarPagina(baseScrolling, backGround, nome)
 	local page = Instance.new("ScrollingFrame")
 	page.Name = tostring(nome) .. "Scroll"
+	page.Parent = backGround
 
-	local base = self.TemplateScrollingFrame
+	CopiarAparenciaScrolling(baseScrolling, page)
 
-	page.Size = base.Size
-	page.Position = base.Position
-	page.AnchorPoint = base.AnchorPoint
-	page.BackgroundColor3 = base.BackgroundColor3
-	page.BackgroundTransparency = base.BackgroundTransparency
-	page.BorderSizePixel = base.BorderSizePixel
-	page.ScrollBarThickness = base.ScrollBarThickness
-	page.ScrollBarImageColor3 = base.ScrollBarImageColor3
-	page.ScrollBarImageTransparency = base.ScrollBarImageTransparency
-	page.AutomaticCanvasSize = Enum.AutomaticSize.None
-	page.CanvasSize = UDim2.new(0, 0, 0, 0)
-	page.ScrollingDirection = Enum.ScrollingDirection.XY
-	page.Visible = false
-	page.ZIndex = base.ZIndex
-	page.Parent = self.BackGround
-
-	local oldPadding = base:FindFirstChildOfClass("UIPadding")
-
-	if oldPadding then
-		local padding = oldPadding:Clone()
-		padding.Parent = page
+	for _, child in ipairs(baseScrolling:GetChildren()) do
+		if child:IsA("UIPadding") then
+			local padding = child:Clone()
+			padding.Parent = page
+		end
 	end
 
+	local layoutBase = baseScrolling:FindFirstChildOfClass("UIListLayout")
 	local layout = Instance.new("UIListLayout")
-	layout.Name = "UIListLayout"
 
-	local baseLayout = base:FindFirstChildOfClass("UIListLayout")
-
-	if baseLayout then
-		layout.Padding = baseLayout.Padding
-		layout.FillDirection = baseLayout.FillDirection
-		layout.HorizontalAlignment = baseLayout.HorizontalAlignment
-		layout.VerticalAlignment = baseLayout.VerticalAlignment
-		layout.SortOrder = baseLayout.SortOrder
+	if layoutBase then
+		layout.Padding = layoutBase.Padding
+		layout.FillDirection = layoutBase.FillDirection
+		layout.HorizontalAlignment = layoutBase.HorizontalAlignment
+		layout.VerticalAlignment = layoutBase.VerticalAlignment
+		layout.SortOrder = layoutBase.SortOrder
+		layout.Wraps = layoutBase.Wraps
 	else
-		layout.Padding = UDim.new(0, 6)
-		layout.FillDirection = Enum.FillDirection.Vertical
-		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-		layout.VerticalAlignment = Enum.VerticalAlignment.Center
+		layout.Padding = UDim.new(0, 10)
 		layout.SortOrder = Enum.SortOrder.LayoutOrder
 	end
 
 	layout.Parent = page
 
-	local connection = layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		if not self._destroyed and page.Parent then
-			page.CanvasSize = UDim2.new(
-				0,
-				0,
-				0,
-				math.max(0, layout.AbsoluteContentSize.Y + 20)
-			)
-		end
-	end)
-
-	table.insert(self._connections, connection)
-
-	return page
-end
-
-function HubLibrary:_CloneTemplate(name, page)
-	local template = self.Templates and self.Templates:FindFirstChild(name)
-
-	if not template then
-		warn("[Frank Hub] Template ausente:", name)
-		return nil
-	end
-
-	local clone = template:Clone()
-	clone.Visible = true
-	clone.Parent = page
-
-	return clone
+	return page, layout
 end
 
 --==================================================
--- CARREGAR
+-- CARREGAR A INTERFACE EXISTENTE
 --==================================================
 
-function HubLibrary.Carregar(nomeDoHub)
+function HubLibrary.Carregar(nomeDoHub, screenGuiOpcional)
 	local self = setmetatable({}, HubLibrary)
 
 	self.Abas = {}
 	self.AbaAtiva = nil
+	self._destroyed = false
 	self._connections = {}
 	self._itemConnections = {}
-	self._destroyed = false
-	self.OnDiscord = nil
-	self.ConfigCallback = nil
-	self.ConfigTab = nil
 
-	local ScreenGui = HubLibrary._CriarInterface()
+	local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+	local ScreenGui = screenGuiOpcional
+
+	if not ScreenGui then
+		ScreenGui = PlayerGui:FindFirstChild("Menu Hub")
+	end
+
+	if not ScreenGui then
+		error('[HubLibrary] "Menu Hub" nao foi encontrada no PlayerGui.')
+	end
+
+	if not ScreenGui:IsA("ScreenGui") then
+		error('[HubLibrary] "Menu Hub" precisa ser uma ScreenGui.')
+	end
+
+	local BackGround = ScreenGui:FindFirstChild("BackGround")
+
+	if not BackGround or not BackGround:IsA("Frame") then
+		error('[HubLibrary] "BackGround" nao encontrada.')
+	end
+
+	local ScrollingFrame = BackGround:FindFirstChild("ScrollingFrame")
+
+	if not ScrollingFrame or not ScrollingFrame:IsA("ScrollingFrame") then
+		error('[HubLibrary] "ScrollingFrame" nao encontrada.')
+	end
+
+	local Templates = ScrollingFrame:FindFirstChild("Templates")
+
+	if not Templates or not Templates:IsA("Folder") then
+		error('[HubLibrary] "Templates" nao encontrada dentro de ScrollingFrame.')
+	end
+
+	local TabButtonsFrame = EncontrarTabFrame(BackGround)
+
+	if not TabButtonsFrame then
+		error('[HubLibrary] O primeiro "TabButtonsFrame" nao foi encontrado.')
+	end
+
+	local FixedButtonsFrame =
+		EncontrarFrameFixos(BackGround, TabButtonsFrame)
 
 	self.ScreenGui = ScreenGui
-	self.BackGround = ScreenGui:FindFirstChild("BackGround")
-	self.TemplateScrollingFrame =
-		self.BackGround:FindFirstChild("ScrollingFrame")
-	self.Templates =
-		self.TemplateScrollingFrame:FindFirstChild("Templates")
-
-	-- Interface criada pelo arquivo.
-	local tabFrames = {}
-
-	for _, child in ipairs(self.BackGround:GetChildren()) do
-		if child:IsA("Frame") and child.Name == "TabButtonsFrame" then
-			table.insert(tabFrames, child)
-		end
-	end
-
-	self.TabButtonsFrame = tabFrames[1]
-	self.FixedButtonsFrame = tabFrames[2]
-
-	local MenuName = self.BackGround:FindFirstChild("MenuName")
-
-	-- MenuName sera criado logo abaixo quando a funcao
-	-- de insercao for executada.
-	if not MenuName then
-		MenuName = Instance.new("TextLabel")
-		MenuName.Name = "MenuName"
-		MenuName.Position = UDim2Exact(
-			0.03173188120126724,
-			0,
-			-0.12643933296203613,
-			0
-		)
-		MenuName.Size = UDim2Exact(0, 200, 0, 50)
-		MenuName.BackgroundTransparency = 1
-		MenuName.Text = tostring(nomeDoHub or "Frank Hub")
-		MenuName.TextColor3 = Color3Exact(1, 1, 1)
-		MenuName.TextSize = 14
-		MenuName.TextScaled = true
-		MenuName.TextWrapped = true
-		MenuName.TextXAlignment = Enum.TextXAlignment.Right
-		MenuName.TextYAlignment = Enum.TextYAlignment.Center
-		SetTextFont(
-			MenuName,
-			"rbxasset://fonts/families/SourceSansPro.json",
-			700,
-			true
-		)
-		MenuName.ZIndex = 1
-		MenuName.Parent = self.BackGround
-
-		CriarStroke(
-			MenuName,
-			"UIStroke",
-			3,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Border,
-			Enum.BorderStrokePosition.Outer
-		)
-	end
-
-	MenuName.Text = tostring(nomeDoHub or "Frank Hub")
+	self.BackGround = BackGround
+	self.Templates = Templates
+	self.TemplateScrollingFrame = ScrollingFrame
+	self.TabButtonsFrame = TabButtonsFrame
+	self.FixedButtonsFrame = FixedButtonsFrame
 
 	--==================================================
-	-- Close
+	-- IMPORTANTE:
+	-- O ScrollingFrame original fica escondido.
+	-- Ele funciona como base visual para as paginas.
 	--==================================================
 
-	local Close = Instance.new("TextButton")
-	Close.Name = "Close"
-	Close.Position = UDim2Exact(
-		0.9155639410018921,
-		0,
-		-0.10804338753223419,
-		0
-	)
-	Close.Size = UDim2Exact(
-		0.07383592426776886,
-		0,
-		0.06910896301269531,
-		0
-	)
-	Close.BackgroundColor3 = Color3Exact(
-		1,
-		0.27450981736183167,
-		0.2862745225429535
-	)
-	Close.BorderSizePixel = 0
-	Close.Text = "X"
-	Close.TextColor3 = Color3Exact(1, 1, 1)
-	Close.TextSize = 14
-	Close.TextScaled = true
-	Close.TextWrapped = true
-	Close.TextXAlignment = Enum.TextXAlignment.Right
-	Close.TextYAlignment = Enum.TextYAlignment.Center
-	Close.Active = true
-	Close.ZIndex = 1
-	SetTextFont(
-		Close,
-		"rbxasset://fonts/families/GothamSSm.json",
-		900,
-		false
-	)
-	Close.Parent = self.BackGround
+	ScrollingFrame.Visible = false
+	EsconderTemplates(Templates)
 
-	CriarStroke(
-		Close,
-		"UIStroke",
-		2.1,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	local menuName = BackGround:FindFirstChild("MenuName")
 
-	CriarStroke(
-		Close,
-		"UIStroke1",
-		3.5,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Contextual,
-		Enum.BorderStrokePosition.Outer,
-		Enum.LineJoinMode.Miter
-	)
-
-	local CloseRatio = Instance.new("UIAspectRatioConstraint")
-	CloseRatio.Name = "UIAspectRatioConstraint"
-	CloseRatio.AspectRatio = 1.0327868461608887
-	SetSafe(
-		CloseRatio,
-		"AspectType",
-		Enum.AspectType.FitWithinMaxSize
-	)
-	SetSafe(
-		CloseRatio,
-		"DominantAxis",
-		Enum.DominantAxis.Width
-	)
-	CloseRatio.Parent = Close
-
-	local CloseImage = Instance.new("ImageLabel")
-	CloseImage.Name = "ImageLabel"
-	CloseImage.Position = UDim2Exact(
-		-0.020998133346438408,
-		0,
-		-0.00829874724149704,
-		0
-	)
-	CloseImage.Size = UDim2Exact(
-		1.0000001192092896,
-		0,
-		0.9836075305938721,
-		0
-	)
-	CloseImage.BackgroundColor3 = Color3Exact(
-		0.4941176772117615,
-		0.8823530077934265,
-		1
-	)
-	CloseImage.BackgroundTransparency = 1
-	CloseImage.BorderSizePixel = 0
-	CloseImage.Image = "rbxassetid://8398274754"
-	CloseImage.ImageColor3 = Color3Exact(1, 1, 1)
-	CloseImage.ImageTransparency = 0.61
-	CloseImage.ScaleType = Enum.ScaleType.Crop
-	CloseImage.Parent = Close
-
-	--==================================================
-	-- Segundo TabButtonsFrame
-	--==================================================
-
-	local FixedFrame = self.FixedButtonsFrame
-
-	if not FixedFrame then
-		FixedFrame = Instance.new("Frame")
-		FixedFrame.Name = "TabButtonsFrame"
-		FixedFrame.Position = UDim2Exact(
-			1.0430711507797241,
-			0,
-			0.026639344170689583,
-			0
-		)
-		FixedFrame.Size = UDim2Exact(0, 169, 0, 461)
-		FixedFrame.BackgroundTransparency = 1
-		FixedFrame.Parent = self.BackGround
-
-		local fixedLayout = Instance.new("UIListLayout")
-		fixedLayout.Name = "UIListLayout"
-		fixedLayout.FillDirection = Enum.FillDirection.Horizontal
-		fixedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-		fixedLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-		fixedLayout.Padding = UDimExact(0, 75)
-		fixedLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		fixedLayout.Parent = FixedFrame
-
-		self.FixedButtonsFrame = FixedFrame
+	if menuName and menuName:IsA("TextLabel") then
+		menuName.Text = tostring(nomeDoHub or "Frank Hub")
 	end
 
-	local function CriarFixedButton(name, text)
-		local button = Instance.new("TextButton")
-		button.Name = name
-		button.Position = UDim2Exact(
-			0.08875739574432373,
-			0,
-			0.12364425510168076,
-			0
-		)
-		button.Size = UDim2Exact(0, 153, 0, -57)
-		button.BackgroundColor3 = Color3Exact(
-			234 / 255,
-			0,
-			8 / 255
-		)
-		button.BorderSizePixel = 0
-		button.Text = text
-		button.TextColor3 = Color3Exact(1, 1, 1)
-		button.TextSize = 25
-		button.TextScaled = false
-		button.TextWrapped = true
-		button.TextXAlignment = Enum.TextXAlignment.Right
-		button.TextYAlignment = Enum.TextYAlignment.Center
-		button.AutoButtonColor = true
-		SetTextFont(
-			button,
-			"rbxasset://fonts/families/LegacyArial.json",
-			700,
-			false
-		)
-		button.Parent = FixedFrame
-
-		CriarStroke(
-			button,
-			"UIStroke",
-			3,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Contextual,
-			Enum.BorderStrokePosition.Outer
-		)
-
-		local InnerStroke = Instance.new("Frame")
-		InnerStroke.Name = "UiStroke"
-		InnerStroke.Position = UDim2Exact(
-			0,
-			0,
-			0.8771929740905762,
-			0
-		)
-		InnerStroke.Size = UDim2Exact(0, 153, 0, 7)
-		InnerStroke.BackgroundColor3 = Color3Exact(
-			130 / 255,
-			0,
-			6 / 255
-		)
-		InnerStroke.BorderSizePixel = 0
-		InnerStroke.Parent = button
-
-		CriarStroke(
-			button,
-			"UIStroke1",
-			3,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Contextual,
-			Enum.BorderStrokePosition.Outer
-		)
-
-		return button
-	end
-
-	local DiscordButton = FixedFrame:FindFirstChild("DiscordButton")
-	local ConfigButton = FixedFrame:FindFirstChild("ConfigButton")
-
-	if not DiscordButton then
-		DiscordButton = CriarFixedButton("DiscordButton", "Discord")
-	end
-
-	if not ConfigButton then
-		ConfigButton = CriarFixedButton("ConfigButton", "Config")
-	end
-
-	Conectar(self._connections, DiscordButton.MouseButton1Click, function()
-		ExecutarCallback(self.OnDiscord)
-	end)
-
-	Conectar(self._connections, ConfigButton.MouseButton1Click, function()
-		if self.ConfigCallback then
-			ExecutarCallback(self.ConfigCallback)
-		elseif self.ConfigTab then
-			self:SelecionarAba(self.ConfigTab)
-		end
-	end)
-
 	--==================================================
-	-- Drag
+	-- FECHAR
 	--==================================================
 
-	local BackGroundTop = self.BackGround:FindFirstChild("BackGroundTop")
+	local closeButton = BackGround:FindFirstChild("Close")
+
+	if closeButton and closeButton:IsA("GuiButton") then
+		Conectar(self._connections, closeButton.MouseButton1Click, function()
+			if not self._destroyed then
+				self:Destroy()
+			end
+		end)
+	end
+
+	--==================================================
+	-- ARRASTAR
+	--==================================================
+
+	local BackGroundTop = BackGround:FindFirstChild("BackGroundTop")
 
 	if BackGroundTop and BackGroundTop:IsA("GuiObject") then
-		local dragging = false
-		local startMouse
-		local startPosition
+		local arrastando = false
+		local inicioMouse = nil
+		local inicioPosicao = nil
 
 		Conectar(self._connections, BackGroundTop.InputBegan, function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1
 				or input.UserInputType == Enum.UserInputType.Touch then
 
-				dragging = true
-				startMouse = input.Position
-				startPosition = self.BackGround.Position
+				arrastando = true
+				inicioMouse = input.Position
+				inicioPosicao = BackGround.Position
 			end
 		end)
 
@@ -1436,12 +469,12 @@ function HubLibrary.Carregar(nomeDoHub)
 			if input.UserInputType == Enum.UserInputType.MouseButton1
 				or input.UserInputType == Enum.UserInputType.Touch then
 
-				dragging = false
+				arrastando = false
 			end
 		end)
 
 		Conectar(self._connections, UserInputService.InputChanged, function(input)
-			if self._destroyed or not dragging then
+			if self._destroyed or not arrastando then
 				return
 			end
 
@@ -1450,26 +483,54 @@ function HubLibrary.Carregar(nomeDoHub)
 				return
 			end
 
-			if not startMouse or not startPosition then
+			if not inicioMouse or not inicioPosicao then
 				return
 			end
 
-			local delta = input.Position - startMouse
+			local delta = input.Position - inicioMouse
 
-			self.BackGround.Position = UDim2.new(
-				startPosition.X.Scale,
-				startPosition.X.Offset + delta.X,
-				startPosition.Y.Scale,
-				startPosition.Y.Offset + delta.Y
+			BackGround.Position = UDim2.new(
+				inicioPosicao.X.Scale,
+				inicioPosicao.X.Offset + delta.X,
+				inicioPosicao.Y.Scale,
+				inicioPosicao.Y.Offset + delta.Y
 			)
 		end)
+	end
+
+	--==================================================
+	-- BOTOES FIXOS
+	--==================================================
+
+	if FixedButtonsFrame then
+		local DiscordButton = FixedButtonsFrame:FindFirstChild("DiscordButton")
+		local ConfigButton = FixedButtonsFrame:FindFirstChild("ConfigButton")
+
+		if DiscordButton and DiscordButton:IsA("GuiButton") then
+			Conectar(self._connections, DiscordButton.MouseButton1Click, function()
+				ExecutarCallback(self.OnDiscord)
+			end)
+		end
+
+		if ConfigButton and ConfigButton:IsA("GuiButton") then
+			Conectar(self._connections, ConfigButton.MouseButton1Click, function()
+				if self.ConfigCallback then
+					ExecutarCallback(self.ConfigCallback)
+					return
+				end
+
+				if self.ConfigTab then
+					self:SelecionarAba(self.ConfigTab)
+				end
+			end)
+		end
 	end
 
 	return self
 end
 
 --==================================================
--- SELECAO DE ABA
+-- SELECIONAR ABA
 --==================================================
 
 function HubLibrary:SelecionarAba(aba)
@@ -1477,14 +538,14 @@ function HubLibrary:SelecionarAba(aba)
 		return
 	end
 
-	for _, other in ipairs(self.Abas) do
-		if other.Scroll and other.Scroll.Parent then
-			other.Scroll.Visible = false
+	for _, outraAba in ipairs(self.Abas) do
+		if outraAba.Scroll and outraAba.Scroll.Parent then
+			outraAba.Scroll.Visible = false
 		end
 
-		if other.Btn and other.Btn.Parent then
-			other.Btn.BackgroundColor3 = COR_TAB_NORMAL
-			other.Btn.TextColor3 = COR_TEXTO
+		if outraAba.Btn and outraAba.Btn.Parent then
+			outraAba.Btn.BackgroundColor3 = COR_TAB_NORMAL
+			outraAba.Btn.TextColor3 = COR_TAB_TEXTO_NORMAL
 		end
 	end
 
@@ -1493,8 +554,8 @@ function HubLibrary:SelecionarAba(aba)
 	end
 
 	if aba.Btn and aba.Btn.Parent then
-		aba.Btn.BackgroundColor3 = COR_TAB_ATIVA
-		aba.Btn.TextColor3 = COR_TEXTO
+		aba.Btn.BackgroundColor3 = COR_TOPO
+		aba.Btn.TextColor3 = COR_TAB_TEXTO_ATIVA
 	end
 
 	self.AbaAtiva = aba
@@ -1507,26 +568,31 @@ end
 --==================================================
 
 function HubLibrary:AddTab(nomeDaAba)
-	if self._destroyed or not self.TabButtonsFrame then
+	if self._destroyed then
 		return nil
 	end
 
-	local tabTemplate = self.TabButtonsFrame:FindFirstChild("Aba1")
+	local templateButton = self.TabButtonsFrame:FindFirstChild("Aba1")
 
-	if not tabTemplate then
-		warn("[Frank Hub] Aba1 nao encontrada.")
+	if not templateButton or not templateButton:IsA("TextButton") then
+		warn('[HubLibrary] "Aba1" nao encontrada.')
 		return nil
 	end
 
-	tabTemplate.Visible = false
+	-- "Aba1" e o template desenhado a mao.
+	templateButton.Visible = false
 
-	local TabButton = tabTemplate:Clone()
+	local TabButton = templateButton:Clone()
 	TabButton.Name = tostring(nomeDaAba) .. "Button"
 	TabButton.Text = tostring(nomeDaAba)
 	TabButton.Visible = true
 	TabButton.Parent = self.TabButtonsFrame
 
-	local ScrollingPage = self:_CreatePage(nomeDaAba)
+	local ScrollingPage, PageLayout = CriarPagina(
+		self.TemplateScrollingFrame,
+		self.BackGround,
+		nomeDaAba
+	)
 
 	local abaSelf = {
 		ScrollingFrame = ScrollingPage,
@@ -1535,16 +601,20 @@ function HubLibrary:AddTab(nomeDaAba)
 		_hub = self,
 		_destroyed = false,
 		Name = tostring(nomeDaAba),
+		Layout = PageLayout,
 	}
 
-	Conectar(self._connections, TabButton.MouseButton1Click, function()
+	-- Se a aba tiver sido destruida, impede callbacks.
+	local clickConnection = TabButton.MouseButton1Click:Connect(function()
 		if not self._destroyed and not abaSelf._destroyed then
 			self:SelecionarAba(abaSelf)
 		end
 	end)
 
+	table.insert(self._connections, clickConnection)
 	table.insert(self.Abas, abaSelf)
 
+	-- Primeira aba fica ativa automaticamente.
 	if #self.Abas == 1 then
 		self:SelecionarAba(abaSelf)
 	end
@@ -1555,88 +625,72 @@ function HubLibrary:AddTab(nomeDaAba)
 end
 
 --==================================================
--- ADD TOGGLE
+-- TOGGLE
 --==================================================
 
 function HubLibrary:AddToggle(texto, callback, valorInicial)
-	if self._destroyed or not self.Scroll then
+	if self._destroyed or not self.ScrollingFrame then
 		return nil
 	end
 
 	local hub = self._hub or self
-	local clone = hub:_CloneTemplate("ToggleTemplate", self.Scroll)
+	local parentScroll = self.Scroll or self.ScrollingFrame
 
-	if not clone then
+	local template = EncontrarTemplate(hub.Templates, "ToggleTemplate")
+
+	if not template then
 		return nil
 	end
 
-	local TitleLabel = clone:FindFirstChild("TitleLabel")
-	local ToggleButton = clone:FindFirstChild("ToggleButton")
+	template.Visible = false
+
+	local ToggleTemplate = template:Clone()
+	ToggleTemplate.Visible = true
+	ToggleTemplate.Parent = parentScroll
+
+	local TitleLabel = EncontrarTitulo(ToggleTemplate)
+	local ToggleButton = EncontrarToggleButton(ToggleTemplate)
 
 	if TitleLabel and TitleLabel:IsA("TextLabel") then
 		TitleLabel.Text = tostring(texto)
 	end
 
-	if not ToggleButton or not ToggleButton:IsA("TextButton") then
-		clone:Destroy()
-		warn("[Frank Hub] ToggleButton nao encontrado.")
+	if not ToggleButton then
+		warn("[HubLibrary] ToggleButton nao encontrado.")
+		ToggleTemplate:Destroy()
 		return nil
 	end
 
 	local ativo = valorInicial == true
 
-	local function Atualizar()
+	local function AtualizarVisual()
 		local cor = ativo and COR_VERDE or COR_CONTROLE
+
 		ToggleButton.BackgroundColor3 = cor
 
-		local line = ToggleButton:FindFirstChild("ButtonLine")
+		local ButtonLine = ToggleButton:FindFirstChild("ButtonLine")
 
-		if line and line:IsA("GuiObject") then
-			line.BackgroundColor3 =
-				ativo and Color3.fromRGB(255, 255, 255)
-				or Color3.fromRGB(100, 100, 100)
-
-			if line:IsA("Frame") then
-				line.Visible = true
-			end
+		if ButtonLine and ButtonLine:IsA("GuiObject") then
+			ButtonLine.BackgroundColor3 = cor
 		end
 	end
 
-	local function Set(valor, disparar)
+	local function Set(valor, dispararCallback)
 		ativo = valor == true
+		AtualizarVisual()
 
-		local targetColor = ativo
-			and COR_VERDE
-			or COR_CONTROLE
-
-		if ToggleButton.Parent then
-			TweenService:Create(
-				ToggleButton,
-				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-				{
-					BackgroundColor3 = targetColor
-				}
-			):Play()
-		end
-
-		Atualizar()
-
-		if disparar ~= false then
+		if dispararCallback ~= false then
 			ExecutarCallback(callback, ativo)
 		end
 	end
 
-	Atualizar()
+	AtualizarVisual()
 
-	Conectar(
-		hub._itemConnections,
-		ToggleButton.MouseButton1Click,
-		function()
-			if clone.Parent then
-				Set(not ativo, true)
-			end
+	Conectar(hub._itemConnections, ToggleButton.MouseButton1Click, function()
+		if ToggleTemplate.Parent then
+			Set(not ativo, true)
 		end
-	)
+	end)
 
 	return {
 		Set = function(_, valor)
@@ -1647,13 +701,13 @@ function HubLibrary:AddToggle(texto, callback, valorInicial)
 			return ativo
 		end,
 
-		Object = clone,
+		Object = ToggleTemplate,
 		Button = ToggleButton,
 	}
 end
 
 --==================================================
--- ADD SLIDER
+-- SLIDER
 --==================================================
 
 function HubLibrary:AddSlider(
@@ -1663,11 +717,12 @@ function HubLibrary:AddSlider(
 	valorPadrao,
 	callback
 )
-	if self._destroyed or not self.Scroll then
+	if self._destroyed or not self.ScrollingFrame then
 		return nil
 	end
 
 	local hub = self._hub or self
+	local parentScroll = self.Scroll or self.ScrollingFrame
 
 	valorMin = tonumber(valorMin) or 0
 	valorMax = tonumber(valorMax) or 100
@@ -1685,38 +740,49 @@ function HubLibrary:AddSlider(
 
 	local valorAtual = valorPadrao
 
-	local clone = hub:_CloneTemplate("SliderTemplate", self.Scroll)
+	local template = EncontrarTemplate(
+		hub.Templates,
+		"SliderTemplate"
+	)
 
-	if not clone then
+	if not template then
 		return nil
 	end
 
-	local TitleLabel = clone:FindFirstChild("TitleLabel")
-	local SliderTrack = clone:FindFirstChild("SliderTrack")
+	template.Visible = false
+
+	local SliderTemplate = template:Clone()
+	SliderTemplate.Visible = true
+	SliderTemplate.Parent = parentScroll
+
+	local TitleLabel = EncontrarTitulo(SliderTemplate)
+	local SliderTrack = SliderTemplate:FindFirstChild("SliderTrack")
 
 	if not SliderTrack then
-		clone:Destroy()
-		warn("[Frank Hub] SliderTrack nao encontrado.")
+		warn("[HubLibrary] SliderTrack nao encontrado.")
+		SliderTemplate:Destroy()
 		return nil
 	end
 
-	local FillButton =
-		SliderTrack:FindFirstChild("FillButton")
-
-	local Progress =
-		SliderTrack:FindFirstChild("Progress")
+	local FillButton = SliderTrack:FindFirstChild("FillButton")
+	local Progress = SliderTrack:FindFirstChild("Progress")
 
 	if not FillButton
 		or not FillButton:IsA("TextButton")
 		or not Progress
 		or not Progress:IsA("GuiObject") then
 
-		clone:Destroy()
-		warn("[Frank Hub] Slider incompleto.")
+		warn("[HubLibrary] FillButton/Progress nao encontrado.")
+		SliderTemplate:Destroy()
 		return nil
 	end
 
-	local function Atualizar()
+	if TitleLabel and TitleLabel:IsA("TextLabel") then
+		TitleLabel.Text =
+			tostring(texto) .. " (" .. tostring(valorAtual) .. ")"
+	end
+
+	local function AtualizarVisual()
 		local percentual = 0
 
 		if valorMax ~= valorMin then
@@ -1727,115 +793,86 @@ function HubLibrary:AddSlider(
 
 		percentual = math.clamp(percentual, 0, 1)
 
-		Progress.Size = UDim2.new(
-			percentual,
-			0,
-			Progress.Size.Y.Scale,
-			Progress.Size.Y.Offset
-		)
+		Progress.Size =
+			UDim2.new(percentual, 0, 1, 0)
 
-		FillButton.Position = UDim2.new(
-			percentual,
-			0,
-			FillButton.Position.Y.Scale,
-			FillButton.Position.Y.Offset
-		)
+		FillButton.Position =
+			UDim2.new(percentual, 0, 0.5, 0)
 
 		if TitleLabel and TitleLabel:IsA("TextLabel") then
 			TitleLabel.Text =
-				tostring(texto)
-				.. " ("
-				.. tostring(valorAtual)
-				.. ")"
+				tostring(texto) .. " (" .. tostring(valorAtual) .. ")"
 		end
 	end
 
-	local function DefinirPorX(x)
+	local function DefinirPorX(posicaoX)
 		if not SliderTrack.Parent then
 			return
 		end
 
-		local largura =
-			SliderTrack.AbsoluteSize.X
+		local largura = SliderTrack.AbsoluteSize.X
 
 		if largura <= 0 then
 			return
 		end
 
 		local percentual =
-			(x - SliderTrack.AbsolutePosition.X)
+			(posicaoX - SliderTrack.AbsolutePosition.X)
 			/ largura
 
-		percentual =
-			math.clamp(percentual, 0, 1)
+		percentual = math.clamp(percentual, 0, 1)
 
 		valorAtual = math.round(
 			valorMin
 			+ ((valorMax - valorMin) * percentual)
 		)
 
-		Atualizar()
+		AtualizarVisual()
 		ExecutarCallback(callback, valorAtual)
 	end
 
-	local dragging = false
+	local arrastando = false
 
-	Conectar(
-		hub._itemConnections,
-		SliderTrack.InputBegan,
-		function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
+	Conectar(hub._itemConnections, SliderTrack.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
 
-				dragging = true
-				DefinirPorX(input.Position.X)
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		FillButton.InputBegan,
-		function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = true
-				DefinirPorX(input.Position.X)
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		UserInputService.InputEnded,
-		function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch then
-
-				dragging = false
-			end
-		end
-	)
-
-	Conectar(
-		hub._itemConnections,
-		UserInputService.InputChanged,
-		function(input)
-			if not dragging then
-				return
-			end
-
-			if input.UserInputType ~= Enum.UserInputType.MouseMovement
-				and input.UserInputType ~= Enum.UserInputType.Touch then
-				return
-			end
-
+			arrastando = true
 			DefinirPorX(input.Position.X)
 		end
-	)
+	end)
 
-	Atualizar()
+	Conectar(hub._itemConnections, FillButton.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			arrastando = true
+			DefinirPorX(input.Position.X)
+		end
+	end)
+
+	Conectar(hub._itemConnections, UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			arrastando = false
+		end
+	end)
+
+	Conectar(hub._itemConnections, UserInputService.InputChanged, function(input)
+		if not arrastando then
+			return
+		end
+
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement
+			and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		DefinirPorX(input.Position.X)
+	end)
+
+	AtualizarVisual()
 
 	return {
 		Set = function(_, valor)
@@ -1851,7 +888,7 @@ function HubLibrary:AddSlider(
 				valorMax
 			)
 
-			Atualizar()
+			AtualizarVisual()
 			ExecutarCallback(callback, valorAtual)
 		end,
 
@@ -1859,14 +896,14 @@ function HubLibrary:AddSlider(
 			return valorAtual
 		end,
 
-		Object = clone,
+		Object = SliderTemplate,
 		Track = SliderTrack,
 		FillButton = FillButton,
 	}
 end
 
 --==================================================
--- ADD DROPDOWN
+-- DROPDOWN
 --==================================================
 
 function HubLibrary:AddDropdown(
@@ -1875,11 +912,12 @@ function HubLibrary:AddDropdown(
 	callback,
 	valorInicial
 )
-	if self._destroyed or not self.Scroll then
+	if self._destroyed or not self.ScrollingFrame then
 		return nil
 	end
 
 	local hub = self._hub or self
+	local parentScroll = self.Scroll or self.ScrollingFrame
 
 	opcoes =
 		typeof(opcoes) == "table"
@@ -1896,122 +934,98 @@ function HubLibrary:AddDropdown(
 		end
 	end
 
-	local clone =
-		hub:_CloneTemplate(
-			"DropdownTemplate",
-			self.Scroll
+	local template =
+		EncontrarTemplate(
+			hub.Templates,
+			"DropdownTemplate"
 		)
 
-	if not clone then
+	if not template then
 		return nil
 	end
 
-	clone.ClipsDescendants = false
+	template.Visible = false
 
-	local TitleLabel = clone:FindFirstChild("TitleLabel")
+	local DropdownTemplate = template:Clone()
+	DropdownTemplate.Visible = true
+	DropdownTemplate.ClipsDescendants = false
+	DropdownTemplate.Parent = parentScroll
+
+	local TitleLabel = DropdownTemplate:FindFirstChild("TitleLabel")
 	local DropdownButton =
-		clone:FindFirstChild("Frame")
+		EncontrarDropdownButton(DropdownTemplate)
 
 	if TitleLabel and TitleLabel:IsA("TextLabel") then
 		TitleLabel.Text = tostring(texto)
 	end
 
-	if not DropdownButton
-		or not DropdownButton:IsA("TextButton") then
-
-		clone:Destroy()
-		warn("[Frank Hub] Dropdown Button nao encontrado.")
+	if not DropdownButton then
+		warn("[HubLibrary] Botao do Dropdown nao encontrado.")
+		DropdownTemplate:Destroy()
 		return nil
 	end
 
 	local SelectedLabel =
-		DropdownButton:FindFirstChild("TitleLabel")
+		EncontrarDropdownTexto(DropdownButton)
 
-	local Arrow =
-		DropdownButton:FindFirstChild("TextLabel")
-
-	local Container = Instance.new("Frame")
-	Container.Name = "ContainerOpcoes"
-	Container.Size = UDim2.new(
-		0,
+	local ContainerOpcoes = Instance.new("Frame")
+	ContainerOpcoes.Name = "ContainerOpcoes"
+	ContainerOpcoes.Size = UDim2.new(
+		DropdownButton.Size.X.Scale,
 		DropdownButton.Size.X.Offset,
 		0,
-		math.max(1, #opcoes * 30)
+		math.max(#opcoes * 30, 1)
 	)
-	Container.Position = UDim2.new(
-		0,
+
+	ContainerOpcoes.Position = UDim2.new(
+		DropdownButton.Position.X.Scale,
 		DropdownButton.Position.X.Offset,
 		0,
 		DropdownButton.Position.Y.Offset
 			+ DropdownButton.Size.Y.Offset
 			+ 5
 	)
-	Container.BackgroundColor3 =
+
+	ContainerOpcoes.BackgroundColor3 =
 		Color3.fromRGB(25, 25, 25)
-	Container.BorderSizePixel = 0
-	Container.Visible = false
-	Container.ZIndex = 100
-	Container.Parent = clone
 
-	CriarStroke(
-		Container,
-		"UIStroke",
-		2,
-		COR_BORDA,
-		Enum.ApplyStrokeMode.Border,
-		Enum.BorderStrokePosition.Outer
-	)
+	ContainerOpcoes.BorderSizePixel = 0
+	ContainerOpcoes.Visible = false
+	ContainerOpcoes.ZIndex = 100
+	ContainerOpcoes.Parent = DropdownTemplate
 
-	CriarCorner(Container, 5)
+	AplicarBorda(ContainerOpcoes, 2)
+	Arredondar(ContainerOpcoes, 5)
 
-	local Layout =
-		Instance.new("UIListLayout")
+	local OptionLayout = Instance.new("UIListLayout")
+	OptionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	OptionLayout.Parent = ContainerOpcoes
 
-	Layout.Name = "UIListLayout"
-	Layout.FillDirection =
-		Enum.FillDirection.Vertical
-	Layout.SortOrder =
-		Enum.SortOrder.LayoutOrder
-	Layout.Parent = Container
-
-	local opened = false
-	local originalSize = clone.Size
+	local aberto = false
+	local tamanhoOriginal = DropdownTemplate.Size
 
 	local function AtualizarTexto()
-		local current =
+		local textoSelecionado =
 			valorAtual == nil
 			and "Select Option..."
 			or tostring(valorAtual)
 
-		if SelectedLabel
-			and SelectedLabel:IsA("TextLabel") then
-
-			SelectedLabel.Text = current
-		end
-
-		if Arrow
-			and Arrow:IsA("TextLabel") then
-
-			Arrow.Text =
-				opened and "v" or "^"
+		if SelectedLabel and SelectedLabel:IsA("TextLabel") then
+			SelectedLabel.Text = textoSelecionado
+		elseif DropdownButton:IsA("TextButton") then
+			DropdownButton.Text = textoSelecionado
 		end
 	end
 
 	local function Fechar()
-		opened = false
-		Container.Visible = false
-
-		AtualizarTexto()
+		aberto = false
+		ContainerOpcoes.Visible = false
 
 		TweenService:Create(
-			clone,
-			TweenInfo.new(
-				0.16,
-				Enum.EasingStyle.Quad,
-				Enum.EasingDirection.Out
-			),
+			DropdownTemplate,
+			TweenInfo.new(0.18),
 			{
-				Size = originalSize
+				Size = tamanhoOriginal
 			}
 		):Play()
 	end
@@ -2021,37 +1035,31 @@ function HubLibrary:AddDropdown(
 			return
 		end
 
-		opened = true
-		Container.Visible = true
-		AtualizarTexto()
+		aberto = true
+		ContainerOpcoes.Visible = true
+
+		local alturaExtra =
+			(#opcoes * 30) + 10
 
 		TweenService:Create(
-			clone,
-			TweenInfo.new(
-				0.16,
-				Enum.EasingStyle.Quad,
-				Enum.EasingDirection.Out
-			),
+			DropdownTemplate,
+			TweenInfo.new(0.18),
 			{
 				Size = UDim2.new(
-					originalSize.X.Scale,
-					originalSize.X.Offset,
+					tamanhoOriginal.X.Scale,
+					tamanhoOriginal.X.Offset,
 					0,
-					originalSize.Y.Offset
-						+ (#opcoes * 30)
-						+ 10
+					tamanhoOriginal.Y.Offset + alturaExtra
 				)
 			}
 		):Play()
 	end
 
-	AtualizarTexto()
-
 	Conectar(
 		hub._itemConnections,
 		DropdownButton.MouseButton1Click,
 		function()
-			if opened then
+			if aberto then
 				Fechar()
 			else
 				Abrir()
@@ -2060,65 +1068,75 @@ function HubLibrary:AddDropdown(
 	)
 
 	for indice, opcao in ipairs(opcoes) do
-		local button =
-			Instance.new("TextButton")
-
-		button.Name =
-			"Option" .. tostring(indice)
-
-		button.LayoutOrder = indice
-		button.Size =
-			UDim2.new(1, 0, 0, 30)
-
-		button.BackgroundColor3 =
+		local OptionButton = Instance.new("TextButton")
+		OptionButton.Name = "Option" .. tostring(indice)
+		OptionButton.Size = UDim2.new(1, 0, 0, 30)
+		OptionButton.BackgroundColor3 =
 			Color3.fromRGB(25, 25, 25)
-
-		button.BorderSizePixel = 0
-		button.Text = tostring(opcao)
-		button.TextColor3 =
+		OptionButton.BorderSizePixel = 0
+		OptionButton.Text = tostring(opcao)
+		OptionButton.TextColor3 =
 			Color3.fromRGB(255, 255, 255)
-		button.TextSize = 16
-		button.Font = Enum.Font.SourceSans
-		button.ZIndex = 101
-		button.AutoButtonColor = false
-		button.Parent = Container
+		OptionButton.Font = Enum.Font.SourceSans
+		OptionButton.TextSize = 16
+		OptionButton.AutoButtonColor = false
+		OptionButton.ZIndex = 101
+		OptionButton.LayoutOrder = indice
+		OptionButton.Parent = ContainerOpcoes
 
 		Conectar(
 			hub._itemConnections,
-			button.MouseEnter,
+			OptionButton.MouseEnter,
 			function()
-				button.BackgroundColor3 =
-					Color3.fromRGB(45, 45, 45)
+				if OptionButton.Parent then
+					TweenService:Create(
+						OptionButton,
+						TweenInfo.new(0.1),
+						{
+							BackgroundColor3 =
+								Color3.fromRGB(45, 45, 45)
+						}
+					):Play()
+				end
 			end
 		)
 
 		Conectar(
 			hub._itemConnections,
-			button.MouseLeave,
+			OptionButton.MouseLeave,
 			function()
-				button.BackgroundColor3 =
-					Color3.fromRGB(25, 25, 25)
+				if OptionButton.Parent then
+					TweenService:Create(
+						OptionButton,
+						TweenInfo.new(0.1),
+						{
+							BackgroundColor3 =
+								Color3.fromRGB(25, 25, 25)
+						}
+					):Play()
+				end
 			end
 		)
 
 		Conectar(
 			hub._itemConnections,
-			button.MouseButton1Click,
+			OptionButton.MouseButton1Click,
 			function()
 				valorAtual = opcao
+				AtualizarTexto()
 				Fechar()
-				ExecutarCallback(
-					callback,
-					opcao
-				)
+				ExecutarCallback(callback, opcao)
 			end
 		)
 	end
+
+	AtualizarTexto()
 
 	return {
 		Set = function(_, valor)
 			valorAtual = valor
 			AtualizarTexto()
+
 			ExecutarCallback(
 				callback,
 				valorAtual
@@ -2137,13 +1155,13 @@ function HubLibrary:AddDropdown(
 			Fechar()
 		end,
 
-		Object = clone,
+		Object = DropdownTemplate,
 		Button = DropdownButton,
 	}
 end
 
 --==================================================
--- ADD INFO CARD
+-- INFO CARD
 --==================================================
 
 function HubLibrary:AddInfoCard(
@@ -2151,167 +1169,160 @@ function HubLibrary:AddInfoCard(
 	iconeId,
 	listaDeTextos
 )
-	if self._destroyed or not self.Scroll then
+	if self._destroyed or not self.ScrollingFrame then
 		return nil
 	end
 
 	local hub = self._hub or self
+	local parentScroll = self.Scroll or self.ScrollingFrame
 
 	listaDeTextos =
 		typeof(listaDeTextos) == "table"
 		and listaDeTextos
 		or {}
 
-	local clone =
-		hub:_CloneTemplate(
-			"InfoCardTemplate",
-			self.Scroll
+	local template =
+		EncontrarTemplate(
+			hub.Templates,
+			"InfoCardTemplate"
 		)
 
-	if not clone then
+	if not template then
 		return nil
 	end
 
+	template.Visible = false
+
+	local InfoCardTemplate = template:Clone()
+	InfoCardTemplate.Visible = true
+	InfoCardTemplate.Parent = parentScroll
+
 	local TitleLabel =
-		clone:FindFirstChild("TitleLabel")
+		InfoCardTemplate:FindFirstChild("TitleLabel")
 
 	local Icon =
-		clone:FindFirstChild("Icon")
+		InfoCardTemplate:FindFirstChild("Icon")
 
 	local ListInformations =
-		clone:FindFirstChild(
+		InfoCardTemplate:FindFirstChild(
 			"ListInformations"
 		)
 
-	if TitleLabel
-		and TitleLabel:IsA("TextLabel") then
-
-		TitleLabel.Text =
-			tostring(tituloCard)
+	if TitleLabel and TitleLabel:IsA("TextLabel") then
+		TitleLabel.Text = tostring(tituloCard)
 	end
 
-	if Icon
-		and Icon:IsA("ImageLabel") then
-
+	if Icon and Icon:IsA("ImageLabel") then
 		Icon.Image =
-			tostring(iconeId or
-				"rbxasset://textures/ui/GuiImagePlaceholder.png")
+			NormalizarImagem(iconeId)
 	end
 
 	if ListInformations
 		and ListInformations:IsA("GuiObject") then
 
-		local template =
+		local InformationTemplate =
 			ListInformations:FindFirstChild(
 				"InformationTextTemplate"
 			)
 
-		if template
-			and template:IsA("TextLabel") then
+		if InformationTemplate
+			and InformationTemplate:IsA("TextLabel") then
 
-			template.Visible = false
+			InformationTemplate.Visible = false
 
 			for _, child in ipairs(
 				ListInformations:GetChildren()
 			) do
 				if child:IsA("TextLabel")
-					and child ~= template then
-
+					and child ~= InformationTemplate then
 					child:Destroy()
 				end
 			end
 
-			for indice, texto in ipairs(
-				listaDeTextos
-			) do
+			for indice, texto in ipairs(listaDeTextos) do
+				local InformationText =
+					InformationTemplate:Clone()
 
-				local info =
-					template:Clone()
+				InformationText.Name =
+					"InformationText" .. tostring(indice)
 
-				info.Name =
-					"InformationText"
-					.. tostring(indice)
-
-				info.Text =
+				InformationText.Text =
 					tostring(texto)
 
-				info.LayoutOrder =
-					indice
-
-				info.Visible = true
-				info.Parent =
+				InformationText.Visible = true
+				InformationText.LayoutOrder = indice
+				InformationText.Parent =
 					ListInformations
 			end
 		end
 	end
 
 	return {
-		Object = clone
+		Object = InfoCardTemplate
 	}
 end
 
 --==================================================
--- ADD BUTTON
+-- BUTTON
+-- Se existir ButtonTemplate na pasta Templates,
+-- ele sera usado. Caso contrario, cria um fallback.
 --==================================================
 
 function HubLibrary:AddButton(texto, callback)
-	if self._destroyed or not self.Scroll then
+	if self._destroyed or not self.ScrollingFrame then
 		return nil
 	end
 
 	local hub = self._hub or self
-	local clone
+	local parentScroll = self.Scroll or self.ScrollingFrame
 
 	local template =
-		hub.Templates
-		and hub.Templates:FindFirstChild(
+		EncontrarTemplate(
+			hub.Templates,
 			"ButtonTemplate"
 		)
 
+	local ButtonTemplate
+
 	if template then
-		clone = template:Clone()
-		clone.Visible = true
-		clone.Parent = self.Scroll
+		template.Visible = false
+
+		ButtonTemplate = template:Clone()
+		ButtonTemplate.Visible = true
+		ButtonTemplate.Parent = parentScroll
 	else
-		clone = Instance.new("TextButton")
-		clone.Name = "ButtonTemplate"
-		clone.Size =
-			UDim2.new(1, -10, 0, 45)
-		clone.BackgroundColor3 =
-			COR_CARD
-		clone.BorderSizePixel = 0
-		clone.TextColor3 =
+		ButtonTemplate = Instance.new("TextButton")
+		ButtonTemplate.Name = "ButtonTemplate"
+		ButtonTemplate.Size = UDim2.new(1, -10, 0, 45)
+		ButtonTemplate.BackgroundColor3 = COR_CARD
+		ButtonTemplate.BorderSizePixel = 0
+		ButtonTemplate.TextColor3 =
 			Color3.fromRGB(255, 255, 255)
-		clone.TextSize = 18
-		clone.Font = Enum.Font.SourceSansBold
-		clone.AutoButtonColor = false
-		clone.Parent = self.Scroll
-		CriarStroke(
-			clone,
-			"UIStroke",
-			2,
-			COR_BORDA,
-			Enum.ApplyStrokeMode.Border,
-			Enum.BorderStrokePosition.Outer
-		)
-		CriarCorner(clone, 5)
+		ButtonTemplate.Font =
+			Enum.Font.SourceSansBold
+		ButtonTemplate.TextSize = 18
+		ButtonTemplate.AutoButtonColor = false
+		ButtonTemplate.Parent = parentScroll
+
+		AplicarBorda(ButtonTemplate)
+		Arredondar(ButtonTemplate, 6)
 	end
 
-	if clone:IsA("TextButton") then
-		clone.Text = tostring(texto)
+	if ButtonTemplate:IsA("TextButton") then
+		ButtonTemplate.Text = tostring(texto)
 	end
 
 	Conectar(
 		hub._itemConnections,
-		clone.MouseEnter,
+		ButtonTemplate.MouseEnter,
 		function()
-			if clone.Parent then
+			if ButtonTemplate.Parent then
 				TweenService:Create(
-					clone,
+					ButtonTemplate,
 					TweenInfo.new(0.12),
 					{
 						BackgroundColor3 =
-							Color3.fromRGB(45, 45, 45)
+							Color3.fromRGB(50, 50, 50)
 					}
 				):Play()
 			end
@@ -2320,15 +1331,17 @@ function HubLibrary:AddButton(texto, callback)
 
 	Conectar(
 		hub._itemConnections,
-		clone.MouseLeave,
+		ButtonTemplate.MouseLeave,
 		function()
-			if clone.Parent then
+			if ButtonTemplate.Parent then
 				TweenService:Create(
-					clone,
+					ButtonTemplate,
 					TweenInfo.new(0.12),
 					{
 						BackgroundColor3 =
-							COR_CARD
+							template
+							and template.BackgroundColor3
+							or COR_CARD
 					}
 				):Play()
 			end
@@ -2337,20 +1350,20 @@ function HubLibrary:AddButton(texto, callback)
 
 	Conectar(
 		hub._itemConnections,
-		clone.MouseButton1Click,
+		ButtonTemplate.MouseButton1Click,
 		function()
 			ExecutarCallback(callback)
 		end
 	)
 
 	return {
-		Object = clone,
-		Button = clone,
+		Object = ButtonTemplate,
+		Button = ButtonTemplate,
 	}
 end
 
 --==================================================
--- CALLBACKS FIXOS
+-- CONFIGURACAO DOS BOTOES FIXOS
 --==================================================
 
 function HubLibrary:SetDiscordCallback(callback)
@@ -2366,7 +1379,7 @@ function HubLibrary:SetConfigTab(aba)
 end
 
 --==================================================
--- DESTROY
+-- DESTRUIR
 --==================================================
 
 function HubLibrary:Destroy()
@@ -2379,16 +1392,20 @@ function HubLibrary:Destroy()
 	DesconectarLista(self._connections)
 	DesconectarLista(self._itemConnections)
 
-	for _, aba in ipairs(self.Abas) do
-		if aba then
-			aba._destroyed = true
+	if self.Abas then
+		for _, aba in ipairs(self.Abas) do
+			if aba then
+				aba._destroyed = true
 
-			if aba.Scroll and aba.Scroll.Parent then
-				aba.Scroll:Destroy()
-			end
+				if aba.Scroll
+					and aba.Scroll.Parent then
+					aba.Scroll:Destroy()
+				end
 
-			if aba.Btn and aba.Btn.Parent then
-				aba.Btn:Destroy()
+				if aba.Btn
+					and aba.Btn.Parent then
+					aba.Btn:Destroy()
+				end
 			end
 		end
 	end
@@ -2396,20 +1413,14 @@ function HubLibrary:Destroy()
 	self.Abas = {}
 	self.AbaAtiva = nil
 
-	-- Nao destroi a ScreenGui original de fora;
-	-- esta instancia foi criada pela propria biblioteca.
-	if self.ScreenGui and self.ScreenGui.Parent then
-		self.ScreenGui:Destroy()
-	end
-
+	-- A ScreenGui criada manualmente pelo usuario NAO e destruida.
 	self.ScreenGui = nil
 	self.BackGround = nil
-	self.TemplateScrollingFrame = nil
 	self.Templates = nil
+	self.TemplateScrollingFrame = nil
+	self.ScrollingFrame = nil
 	self.TabButtonsFrame = nil
 	self.FixedButtonsFrame = nil
-	self._connections = {}
-	self._itemConnections = {}
 end
 
 return HubLibrary
