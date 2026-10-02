@@ -2937,4 +2937,44 @@ function HubLibrary:OpenConfig()
 	self:SelecionarAba(self.ConfigTab)
 end
 
-return HubLibrary
+--==================================================
+-- HUB DE EXEMPLO (edite a partir daqui)
+--==================================================
+
+local Library = HubLibrary
+print("[Frank Hub] Versao da biblioteca:", Library.Version)
+
+local Hub = Library.Carregar("Frank Hub Ultra")
+assert(Hub, "Frank Hub: Carregar() retornou nil")
+
+local Farm = Hub:AddTab("Farm")
+
+Farm:AddInfoCard(
+	"Egg Predictor",
+	"rbxasset://textures/ui/GuiImagePlaceholder.png",
+	{ "3.03x", "Predictor ativo" }
+)
+
+Farm:AddSection("Automacao")
+
+Farm:AddToggle("Auto Steal", function(value)
+	print("[Frank Hub] Auto Steal:", value)
+end, false, "Liga/desliga a funcao", "autoSteal")
+
+Farm:AddDropdown("Target Areas", { "Area 1", "Area 2", "Area 3" }, function(value)
+	print("[Frank Hub] Area:", value)
+end, "Area 1")
+
+Farm:AddSlider("Min Value To Steal", 0, 100, 25, function(value)
+	print("[Frank Hub] Min value:", value)
+end)
+
+Farm:AddButton("Testar notificacao", function()
+	Hub:Notify("Frank Hub", "Tudo funcionando!", 3, "Success")
+end)
+
+Hub:SetDiscordCallback(function()
+	Hub:Notify("Discord", "Configure seu link com Hub:SetDiscordLink(\"...\")", 3, "Info")
+end)
+
+print("[Frank Hub] Ultra carregado com sucesso")
