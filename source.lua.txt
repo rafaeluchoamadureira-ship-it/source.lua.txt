@@ -1,4 +1,4 @@
-# ---------------------------------------------------------------- header
+
 sub('-- FRANK HUB LIBRARY v3.1', '-- FRANK HUB LIBRARY v3.2')
 sub('HubLibrary.Version = "3.1"', 'HubLibrary.Version = "3.2"')
 sub('-- .rbxm nem de ModuleScript no jogo).\n', r'''-- .rbxm nem de ModuleScript no jogo).
