@@ -1,26 +1,31 @@
 --==================================================
--- FRANK HUB LIBRARY v3.2
+-- FRANK HUB LIBRARY v4.0
 --
--- Correcoes principais em relacao a v3.1:
---   * A biblioteca agora RETORNA a tabela (antes o loader falhava
---     com "a biblioteca nao retornou uma tabela").
---   * Removido o hub de exemplo do final do arquivo (ele rodava
---     junto com o do loader e criava dois menus).
---   * Teclas de atalho nao disparam mais enquanto outra tecla esta
---     sendo capturada (e o menu nao abre/fecha ao escolher a tecla).
---   * Controles destruidos agora desconectam seus eventos globais
---     (keybind, slider) e listeners de estado.
---   * Tooltip funciona tambem em controles cobertos por botoes.
---   * Arraste da janela nao inicia ao clicar em X / minimizar.
---   * Protecoes contra uso apos Destroy().
---
--- API mantida: Library.Carregar(nome) -> hub; hub:AddTab -> tab;
--- tab:AddToggle / AddSlider / AddDropdown / AddInfoCard / AddButton /
--- AddKeybind / AddSection / AddLabel / AddSpacer / AddCustom ...
+-- Novidades em relacao a v3.2:
+--   * Id dos itens usa a Flag/StateKey (config nao quebra ao renomear).
+--   * Keybind destruido durante a captura libera o hub.
+--   * Restore/State agora DISPARAM os callbacks (FireCallbacks = false
+--     nas opcoes desativa).
+--   * Conexoes dos controles ficam no proprio controle (sem vazamento).
+--   * Arquivo de config por hub + PlaceId.
+--   * Carregar aceita chamada com ":" e com tabela de opcoes.
+--   * API por tabela em todos os Add* (a forma posicional continua).
+--   * Aliases em ingles: Library.Load, hub:SelectTab, hub:Minimize.
+--   * hub:Ready() carrega o config automaticamente.
+--   * Novos controles: AddInput, AddMultiDropdown, AddColorPicker,
+--     AddParagraph, AddProgress; dropdown com busca; botao com
+--     confirmacao.
+--   * UX: dropdown fecha ao clicar fora / abrir outro; busca mostra
+--     "Nenhum resultado" e contagem por aba; botao flutuante arrastavel
+--     (posicao salva); notificacoes com icone e tema ao vivo; tema
+--     custom e salvo no config.
+--   * Erros de callback com traceback (xpcall) em todos os lugares.
+--   * Validate() detecta ids duplicados e StateKey sem controle.
 --==================================================
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
@@ -29,7 +34,7 @@ local Global = (type(getgenv) == "function" and getgenv()) or _G
 
 local HubLibrary = {}
 HubLibrary.__index = HubLibrary
-HubLibrary.Version = "3.2"
+HubLibrary.Version = "4.0"
 
 local Tab = {}
 -- Metodos da aba primeiro; se nao existir, delega ao hub
@@ -177,6 +182,44 @@ local function MergeTheme(base, custom)
 	return merged
 end
 
+-- Temas custom precisam virar JSON para entrar no config.
+local function SerializeTheme(theme)
+	local out = {}
+	for key, value in pairs(theme) do
+		if typeof(value) == "Color3" then
+			out[key] = {
+				math.floor(value.R * 255 + 0.5),
+				math.floor(value.G * 255 + 0.5),
+				math.floor(value.B * 255 + 0.5),
+			}
+		elseif type(value) == "number" then
+			out[key] = value
+		end
+	end
+	return out
+end
+
+local function DeserializeTheme(data)
+	local out = {}
+	if type(data) ~= "table" then
+		return out
+	end
+	for key, value in pairs(data) do
+		if THEMES.Crimson[key] ~= nil then
+			if type(value) == "table" and #value == 3 then
+				out[key] = Color3.fromRGB(
+					tonumber(value[1]) or 0,
+					tonumber(value[2]) or 0,
+					tonumber(value[3]) or 0
+				)
+			elseif type(value) == "number" then
+				out[key] = value
+			end
+		end
+	end
+	return out
+end
+
 --==================================================
 -- FUNCOES AUXILIARES
 --==================================================
@@ -211,16 +254,30 @@ local function Stroke(parent, thickness, color)
 	return stroke
 end
 
+local function Traceback(err)
+	return tostring(err) .. "\n" .. debug.traceback("", 2)
+end
+
+-- Execucao sincrona protegida (xpcall + traceback).
+local function SafeCall(callback, ...)
+	if type(callback) ~= "function" then
+		return false
+	end
+	local ok, err = xpcall(callback, Traceback, ...)
+	if not ok then
+		warn("[Frank Hub] Callback:", err)
+	end
+	return ok, err
+end
+
+-- Execucao assincrona protegida (callbacks do usuario).
 local function Call(callback, ...)
 	if type(callback) ~= "function" then
 		return
 	end
 	local args = table.pack(...)
 	task.spawn(function()
-		local ok, err = pcall(callback, table.unpack(args, 1, args.n))
-		if not ok then
-			warn("[Frank Hub] Callback:", err)
-		end
+		SafeCall(callback, table.unpack(args, 1, args.n))
 	end)
 end
 
@@ -233,6 +290,26 @@ local function DeepCopy(value)
 		copy[key] = DeepCopy(item)
 	end
 	return copy
+end
+
+local function CopyList(list)
+	local out = {}
+	if type(list) == "table" then
+		for _, value in ipairs(list) do
+			table.insert(out, value)
+		end
+	end
+	return out
+end
+
+-- Primeiro campo nao-nil da tabela (respeita false).
+local function Pick(tbl, ...)
+	for _, key in ipairs({ ... }) do
+		if tbl[key] ~= nil then
+			return tbl[key]
+		end
+	end
+	return nil
 end
 
 local function IsJSONSafe(value, depth)
@@ -322,6 +399,57 @@ local function DisconnectAll(list)
 	table.clear(list)
 end
 
+-- Posicao do input no mesmo espaco do AbsolutePosition
+-- (o ScreenGui usa IgnoreGuiInset = true).
+local function ScreenPoint(position)
+	local inset = GuiService:GetGuiInset()
+	return Vector2.new(position.X, position.Y) + inset
+end
+
+local function ToHex(color)
+	return string.format(
+		"#%02X%02X%02X",
+		math.floor(color.R * 255 + 0.5),
+		math.floor(color.G * 255 + 0.5),
+		math.floor(color.B * 255 + 0.5)
+	)
+end
+
+local function ParseColor(value)
+	if typeof(value) == "Color3" then
+		return value
+	end
+	if type(value) == "string" then
+		local r, g, b = value:match("^#?(%x%x)(%x%x)(%x%x)$")
+		if r then
+			return Color3.fromRGB(tonumber(r, 16), tonumber(g, 16), tonumber(b, 16))
+		end
+	end
+	if type(value) == "table" and #value == 3 then
+		return Color3.fromRGB(
+			math.clamp(tonumber(value[1]) or 0, 0, 255),
+			math.clamp(tonumber(value[2]) or 0, 0, 255),
+			math.clamp(tonumber(value[3]) or 0, 0, 255)
+		)
+	end
+	return nil
+end
+
+local KIND_KEY = {
+	Success = "Success",
+	Warning = "Warning",
+	Error = "Danger",
+	Danger = "Danger",
+	Info = "Accent",
+}
+local KIND_ICON = {
+	Success = "+",
+	Warning = "!",
+	Error = "x",
+	Danger = "x",
+	Info = "i",
+}
+
 --==================================================
 -- TEMA (objetos "tematizados")
 --==================================================
@@ -338,39 +466,51 @@ function HubLibrary:_T(object, property, themeKey)
 	end)
 end
 
-function HubLibrary:_ApplyTheme()
+-- Remove entradas de objetos destruidos; opcionalmente reaplica o tema.
+function HubLibrary:_PruneThemed(apply)
+	if self._destroyed or not self.ScreenGui then
+		return
+	end
 	local alive = {}
 	for _, entry in ipairs(self._themed) do
-		if self.ScreenGui and entry.Object:IsDescendantOf(self.ScreenGui) then
+		if entry.Object:IsDescendantOf(self.ScreenGui) then
 			table.insert(alive, entry)
-			local ok, err = pcall(entry.Apply, self._theme)
-			if not ok then
-				warn("[Frank Hub] Tema:", err)
+			if apply then
+				local ok, err = xpcall(entry.Apply, Traceback, self._theme)
+				if not ok then
+					warn("[Frank Hub] Tema:", err)
+				end
 			end
 		end
 	end
 	self._themed = alive
 end
 
--- owner (opcional): tabela de controle que tambem guarda a conexao em
--- owner._conns, para ser desconectada quando o controle for destruido.
+function HubLibrary:_ApplyTheme()
+	self:_PruneThemed(true)
+end
+
+-- owner (opcional): tabela de controle/aba que guarda a conexao em
+-- owner._conns. Assim ela e desconectada quando o dono for destruido
+-- e NAO fica acumulada em hub._conns.
 function HubLibrary:_Conn(signal, callback, owner)
 	local connection = signal:Connect(callback)
-	table.insert(self._conns, connection)
 	if owner then
 		owner._conns = owner._conns or {}
 		table.insert(owner._conns, connection)
+	else
+		table.insert(self._conns, connection)
 	end
 	return connection
 end
 
-function HubLibrary:_Hover(button, normalKey, hoverKey)
+function HubLibrary:_Hover(button, normalKey, hoverKey, owner)
 	self:_Conn(button.MouseEnter, function()
 		self:Tween(button, { BackgroundColor3 = self._theme[hoverKey] }, 0.1)
-	end)
+	end, owner)
 	self:_Conn(button.MouseLeave, function()
 		self:Tween(button, { BackgroundColor3 = self._theme[normalKey] }, 0.1)
-	end)
+	end, owner)
 end
 
 function HubLibrary:RegisterTheme(name, theme)
@@ -416,7 +556,7 @@ function HubLibrary:GetTheme()
 end
 
 --==================================================
--- EVENTOS
+-- EVENTOS (assincronos, via Call)
 --==================================================
 
 function HubLibrary:On(eventName, callback)
@@ -451,7 +591,7 @@ function HubLibrary:Fire(eventName, ...)
 end
 
 --==================================================
--- STATE
+-- STATE (listeners sincronos, protegidos com xpcall)
 --==================================================
 
 function HubLibrary:GetState(key, fallback)
@@ -467,10 +607,7 @@ function HubLibrary:SetState(key, value, fireEvent)
 	self._state[key] = value
 	if old ~= value and fireEvent ~= false then
 		for _, listener in ipairs(table.clone(self._stateListeners[key] or {})) do
-			local ok, err = pcall(listener, value, old, key)
-			if not ok then
-				warn("[Frank Hub] State:", err)
-			end
+			SafeCall(listener, value, old, key)
 		end
 		self:Fire("StateChanged", key, value, old)
 	end
@@ -536,7 +673,7 @@ function HubLibrary:Tween(object, properties, duration, easingStyle, easingDirec
 end
 
 --==================================================
--- NOTIFICACOES
+-- NOTIFICACOES (com icone por tipo e tema ao vivo)
 --==================================================
 
 function HubLibrary:Notify(title, message, duration, kind)
@@ -545,14 +682,10 @@ function HubLibrary:Notify(title, message, duration, kind)
 	end
 
 	duration = tonumber(duration) or 3.5
-	local theme = self._theme
-	local colors = {
-		Success = theme.Success,
-		Warning = theme.Warning,
-		Error = theme.Danger,
-		Danger = theme.Danger,
-	}
-	local accent = colors[tostring(kind)] or theme.Accent
+	kind = tostring(kind or "Info")
+	if not KIND_KEY[kind] then
+		kind = "Info"
+	end
 
 	local holder = self._notifHolder
 	local existing = {}
@@ -578,29 +711,44 @@ function HubLibrary:Notify(title, message, duration, kind)
 	local card = New("Frame", {
 		Size = UDim2.fromScale(1, 1),
 		Position = UDim2.new(1, 40, 0, 0),
-		BackgroundColor3 = theme.Card,
 		BackgroundTransparency = 0.05,
 		BorderSizePixel = 0,
 		ZIndex = 901,
 	}, wrap)
 	Corner(card, 6)
-	Stroke(card, 2, accent)
+	local cardStroke = Stroke(card, 2)
 
 	local strip = New("Frame", {
 		Size = UDim2.new(0, 4, 1, 0),
-		BackgroundColor3 = accent,
 		BorderSizePixel = 0,
 		ZIndex = 902,
 	}, card)
 	Corner(strip, 3)
 
+	local iconBg = New("Frame", {
+		Name = "Icon",
+		Position = UDim2.fromOffset(14, 22),
+		Size = UDim2.fromOffset(24, 24),
+		BorderSizePixel = 0,
+		ZIndex = 902,
+	}, card)
+	Corner(iconBg, 12)
 	New("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Text = KIND_ICON[kind],
+		TextColor3 = Color3.new(0, 0, 0),
+		TextSize = 18,
+		FontFace = FONT_TITLE,
+		ZIndex = 903,
+	}, iconBg)
+
+	local titleLabel = New("TextLabel", {
 		Name = "Title",
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 6),
-		Size = UDim2.new(1, -22, 0, 22),
+		Position = UDim2.fromOffset(48, 6),
+		Size = UDim2.new(1, -56, 0, 22),
 		Text = tostring(title or "Frank Hub"),
-		TextColor3 = theme.Text,
 		TextSize = 18,
 		FontFace = FONT_BOLD,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -608,13 +756,12 @@ function HubLibrary:Notify(title, message, duration, kind)
 		ZIndex = 902,
 	}, card)
 
-	New("TextLabel", {
+	local messageLabel = New("TextLabel", {
 		Name = "Message",
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 28),
-		Size = UDim2.new(1, -22, 0, 34),
+		Position = UDim2.fromOffset(48, 28),
+		Size = UDim2.new(1, -56, 0, 34),
 		Text = tostring(message or ""),
-		TextColor3 = theme.MutedText,
 		TextSize = 14,
 		FontFace = FONT_REG,
 		TextWrapped = true,
@@ -624,22 +771,39 @@ function HubLibrary:Notify(title, message, duration, kind)
 		ZIndex = 902,
 	}, card)
 
+	-- Tematizado: se o tema mudar com a notificacao aberta, ela acompanha.
+	self:_Themed(card, function(t)
+		local accent = t[KIND_KEY[kind]]
+		card.BackgroundColor3 = t.Card
+		cardStroke.Color = accent
+		strip.BackgroundColor3 = accent
+		iconBg.BackgroundColor3 = accent
+		titleLabel.TextColor3 = t.Text
+		messageLabel.TextColor3 = t.MutedText
+	end)
+
 	self:Tween(card, { Position = UDim2.new(0, 0, 0, 0) }, 0.22, Enum.EasingStyle.Quint)
 	if self._animations == false then
 		card.Position = UDim2.new(0, 0, 0, 0)
 	end
 
+	local function remove()
+		if wrap.Parent then
+			wrap:Destroy()
+		end
+		self:_PruneThemed(false)
+	end
+
 	task.delay(math.max(0.25, duration), function()
 		if not wrap.Parent then
+			self:_PruneThemed(false)
 			return
 		end
 		local tween = self:Tween(card, { Position = UDim2.new(1, 40, 0, 0) }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 		if tween then
-			tween.Completed:Connect(function()
-				wrap:Destroy()
-			end)
+			tween.Completed:Connect(remove)
 		else
-			wrap:Destroy()
+			remove()
 		end
 	end)
 
@@ -669,7 +833,7 @@ function HubLibrary:_PlaceTooltip()
 	tooltip.Position = UDim2.fromOffset(x, y)
 end
 
-function HubLibrary:AddTooltip(object, text)
+function HubLibrary:AddTooltip(object, text, owner)
 	if self._destroyed or not object or not text then
 		return nil
 	end
@@ -688,13 +852,150 @@ function HubLibrary:AddTooltip(object, text)
 		self._tooltipText.Text = tostring(text)
 		self._tooltip.Visible = true
 		self:_PlaceTooltip()
-	end)
+	end, owner)
 	self:_Conn(target.MouseLeave, function()
 		if self._tooltip then
 			self._tooltip.Visible = false
 		end
-	end)
+	end, owner)
 	return target
+end
+
+--==================================================
+-- POPUPS (dropdown / color picker abertos)
+--==================================================
+
+function HubLibrary:_SetOpenPopup(control)
+	local previous = self._openPopup
+	if previous and previous ~= control then
+		self._openPopup = nil
+		if previous.Close then
+			SafeCall(previous.Close)
+		end
+	end
+	self._openPopup = control
+end
+
+function HubLibrary:_ClosePopup()
+	local popup = self._openPopup
+	self._openPopup = nil
+	if popup and popup.Close then
+		SafeCall(popup.Close)
+	end
+end
+
+function HubLibrary:_ClosePopupIfOutside(input)
+	local popup = self._openPopup
+	local object = popup and popup.Object
+	if not object or not object.Parent then
+		self._openPopup = nil
+		return
+	end
+	local point = ScreenPoint(input.Position)
+	local pos, size = object.AbsolutePosition, object.AbsoluteSize
+	if point.X < pos.X or point.X > pos.X + size.X or point.Y < pos.Y or point.Y > pos.Y + size.Y then
+		self:_ClosePopup()
+	end
+end
+
+-- Arraste generico (slider, color picker). onPos recebe input.Position.
+function HubLibrary:_BindDrag(control, hit, scroll, onPos)
+	control._dragConns = control._dragConns or {}
+	self:_Conn(hit.InputBegan, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		DisconnectAll(control._dragConns)
+
+		local isTouch = input.UserInputType == Enum.UserInputType.Touch
+		if scroll then
+			scroll.ScrollingEnabled = false
+		end
+		onPos(input.Position)
+
+		local function stop()
+			DisconnectAll(control._dragConns)
+			if scroll and scroll.Parent then
+				scroll.ScrollingEnabled = true
+			end
+		end
+
+		table.insert(control._dragConns, UserInputService.InputChanged:Connect(function(changed)
+			local isMove
+			if isTouch then
+				isMove = changed == input
+			else
+				isMove = changed.UserInputType == Enum.UserInputType.MouseMovement
+			end
+			if isMove then
+				onPos(changed.Position)
+			end
+		end))
+
+		table.insert(control._dragConns, UserInputService.InputEnded:Connect(function(ended)
+			if ended == input or (not isTouch and ended.UserInputType == Enum.UserInputType.MouseButton1) then
+				stop()
+			end
+		end))
+	end, control)
+end
+
+--==================================================
+-- ARRASTAR (janela e botao flutuante)
+--==================================================
+
+-- Retorna uma tabela { Moved = bool }. Moved so vira true depois de
+-- 4px de movimento, assim um clique simples nao e tratado como arraste.
+function HubLibrary:_MakeDraggable(handle, getOrigin, setPosition)
+	local dragInput, dragStart, dragOrigin
+	local state = { Moved = false }
+
+	self:_Conn(handle.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+			dragStart = input.Position
+			dragOrigin = getOrigin()
+			state.Moved = false
+		end
+	end)
+
+	self:_Conn(UserInputService.InputChanged, function(input)
+		if self._destroyed or not dragInput then
+			return
+		end
+		local isMove
+		if dragInput.UserInputType == Enum.UserInputType.Touch then
+			isMove = input == dragInput
+		else
+			isMove = input.UserInputType == Enum.UserInputType.MouseMovement
+		end
+		if not isMove then
+			return
+		end
+		local delta = input.Position - dragStart
+		if delta.Magnitude > 4 then
+			state.Moved = true
+		end
+		if state.Moved then
+			setPosition(dragOrigin + Vector2.new(delta.X, delta.Y))
+		end
+	end)
+
+	self:_Conn(UserInputService.InputEnded, function(input)
+		if not dragInput then
+			return
+		end
+		if input == dragInput
+			or (dragInput.UserInputType == Enum.UserInputType.MouseButton1
+				and input.UserInputType == Enum.UserInputType.MouseButton1) then
+			dragInput = nil
+		end
+	end)
+
+	return state
 end
 
 --==================================================
@@ -757,8 +1058,7 @@ function HubLibrary:_BuildUI(nomeDoHub)
 		topShadow.BackgroundColor3 = t.TopShadow
 	end)
 
-	-- Area de arraste: nao cobre os botoes X e _ (corrige arraste
-	-- iniciando ao clicar neles).
+	-- Area de arraste: nao cobre os botoes X e _.
 	local dragArea = New("TextButton", {
 		Name = "DragArea",
 		BackgroundTransparency = 1,
@@ -951,7 +1251,23 @@ function HubLibrary:_BuildUI(nomeDoHub)
 	}, content)
 	self._pages = pages
 
-	-- Botao flutuante (reabrir menu, util no mobile) ------
+	-- Estado "Nenhum resultado" da busca
+	local noResults = New("TextLabel", {
+		Name = "NoResults",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 24),
+		Size = UDim2.new(1, -20, 0, 40),
+		BackgroundTransparency = 1,
+		Text = "Nenhum resultado",
+		TextSize = 18,
+		FontFace = FONT_BOLD,
+		Visible = false,
+		ZIndex = 5,
+	}, pages)
+	self:_T(noResults, "TextColor3", "MutedText")
+	self._noResults = noResults
+
+	-- Botao flutuante (reabrir menu; arrastavel) -----------
 	local fab = New("TextButton", {
 		Name = "FloatingToggle",
 		AnchorPoint = Vector2.new(0, 0.5),
@@ -973,9 +1289,6 @@ function HubLibrary:_BuildUI(nomeDoHub)
 		fabStroke.Color = t.Border
 	end)
 	self:_Hover(fab, "Accent", "AccentHover")
-	self:_Conn(fab.MouseButton1Click, function()
-		self:SetVisible(true)
-	end)
 	self._fab = fab
 
 	-- Notificacoes -----------------------------------------
@@ -1033,59 +1346,41 @@ function HubLibrary:_BuildUI(nomeDoHub)
 	self._tooltip = tooltip
 	self._tooltipText = tooltipText
 
-	-- Arrastar a janela -------------------------------------
-	-- A posicao e sempre em escala pura, assim o arraste continua
-	-- correto mesmo com o UIScale responsivo ativo.
-	local dragInput, dragStart, dragOrigin
-
-	self:_Conn(dragArea.InputBegan, function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			dragInput = input
-			dragStart = input.Position
-			dragOrigin = Vector2.new(win.AbsolutePosition.X + win.AbsoluteSize.X * 0.5, win.AbsolutePosition.Y)
+	-- Tooltip segue o mouse
+	self:_Conn(UserInputService.InputChanged, function(input)
+		if not self._destroyed and input.UserInputType == Enum.UserInputType.MouseMovement then
+			self:_PlaceTooltip()
 		end
 	end)
 
-	self:_Conn(UserInputService.InputChanged, function(input)
-		if self._destroyed then
-			return
-		end
-		-- tooltip segue o mouse
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			self:_PlaceTooltip()
-		end
-		if not dragInput then
-			return
-		end
-		local isMove
-		if dragInput.UserInputType == Enum.UserInputType.Touch then
-			isMove = input == dragInput
-		else
-			isMove = input.UserInputType == Enum.UserInputType.MouseMovement
-		end
-		if not isMove then
-			return
-		end
+	-- Arrastar a janela (posicao sempre em escala pura) -----
+	self:_MakeDraggable(dragArea, function()
+		return Vector2.new(win.AbsolutePosition.X + win.AbsoluteSize.X * 0.5, win.AbsolutePosition.Y)
+	end, function(point)
 		local view = gui.AbsoluteSize
 		if view.X <= 0 or view.Y <= 0 then
 			return
 		end
-		local delta = input.Position - dragStart
-		local nx = (dragOrigin.X + delta.X) / view.X
-		local ny = (dragOrigin.Y + delta.Y) / view.Y
-		win.Position = UDim2.fromScale(math.clamp(nx, 0, 1), math.clamp(ny, 0, 0.95))
+		win.Position = UDim2.fromScale(math.clamp(point.X / view.X, 0, 1), math.clamp(point.Y / view.Y, 0, 0.95))
 	end)
 
-	self:_Conn(UserInputService.InputEnded, function(input)
-		if not dragInput then
+	-- Arrastar o botao flutuante (a posicao e lembrada) -----
+	local fabDrag = self:_MakeDraggable(fab, function()
+		return Vector2.new(fab.AbsolutePosition.X, fab.AbsolutePosition.Y + fab.AbsoluteSize.Y * 0.5)
+	end, function(point)
+		local view = gui.AbsoluteSize
+		if view.X <= 0 or view.Y <= 0 then
 			return
 		end
-		if input == dragInput
-			or (dragInput.UserInputType == Enum.UserInputType.MouseButton1
-				and input.UserInputType == Enum.UserInputType.MouseButton1) then
-			dragInput = nil
+		self:SetFabPosition(point.X / view.X, point.Y / view.Y)
+		self:_AutoSaveTick()
+	end)
+
+	self:_Conn(fab.MouseButton1Click, function()
+		if fabDrag.Moved then
+			return
 		end
+		self:SetVisible(true)
 	end)
 
 	-- Escala responsiva ------------------------------------
@@ -1093,12 +1388,20 @@ function HubLibrary:_BuildUI(nomeDoHub)
 		self:SetResponsive(self._responsiveEnabled)
 	end)
 
-	-- Tecla de abrir/fechar --------------------------------
+	-- Clique fora de popups + tecla de abrir/fechar --------
 	self:_Conn(UserInputService.InputBegan, function(input, processed)
-		if self._destroyed or processed or self._capturingKey then
+		if self._destroyed then
 			return
 		end
-		if input.UserInputType == Enum.UserInputType.Keyboard
+		local inputType = input.UserInputType
+		if (inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch)
+			and self._openPopup then
+			self:_ClosePopupIfOutside(input)
+		end
+		if processed or self._capturingKey then
+			return
+		end
+		if inputType == Enum.UserInputType.Keyboard
 			and self._menuKey
 			and input.KeyCode == self._menuKey then
 			self:SetVisible(not self.BackGround.Visible)
@@ -1106,15 +1409,41 @@ function HubLibrary:_BuildUI(nomeDoHub)
 	end)
 end
 
+function HubLibrary:SetFabPosition(x, y)
+	if self._destroyed or not self._fab then
+		return false
+	end
+	x = tonumber(x)
+	y = tonumber(y)
+	if not x or not y then
+		return false
+	end
+	self._fabPos = { X = math.clamp(x, 0, 0.97), Y = math.clamp(y, 0.03, 0.97) }
+	self._fab.Position = UDim2.fromScale(self._fabPos.X, self._fabPos.Y)
+	return true
+end
+
 --==================================================
 -- CARREGAR / DESTROY
 --==================================================
 
-function HubLibrary.Carregar(nomeDoHub, opcoes)
+-- Aceita: Carregar("Nome", opcoes) | Library:Carregar("Nome") |
+--         Carregar({ Name = "Nome", ... })
+function HubLibrary.Carregar(...)
+	local args = { ... }
+	if args[1] == HubLibrary then
+		table.remove(args, 1)
+	end
+	local nomeDoHub, opcoes = args[1], args[2]
+	if type(nomeDoHub) == "table" and opcoes == nil then
+		opcoes = nomeDoHub
+		nomeDoHub = opcoes.Name or opcoes.Title
+	end
 	opcoes = type(opcoes) == "table" and opcoes or {}
+	nomeDoHub = tostring(nomeDoHub or "Frank Hub")
 
 	-- Remove uma instancia anterior mesmo que tenha sido criada por
-	-- outra execucao do loader (a tabela da biblioteca muda a cada execucao).
+	-- outra execucao do loader.
 	local previous = Global.FrankHubActive
 	if type(previous) == "table" and type(previous.Destroy) == "function" then
 		pcall(function()
@@ -1123,7 +1452,6 @@ function HubLibrary.Carregar(nomeDoHub, opcoes)
 	end
 	Global.FrankHubActive = nil
 
-	-- opcoes.Parent permite escolher onde a GUI sera criada.
 	local guiParent = typeof(opcoes.Parent) == "Instance" and opcoes.Parent
 		or LocalPlayer:WaitForChild("PlayerGui")
 	local stale = guiParent:FindFirstChild("Menu Hub")
@@ -1140,6 +1468,8 @@ function HubLibrary.Carregar(nomeDoHub, opcoes)
 	self.ConfigTab = nil
 
 	self._destroyed = false
+	self._ready = false
+	self._restoring = false
 	self._conns = {}
 	self._themed = {}
 	self._themes = {}
@@ -1154,11 +1484,14 @@ function HubLibrary.Carregar(nomeDoHub, opcoes)
 	self._searchEnabled = true
 	self._animations = opcoes.Animations ~= false
 	self._responsiveEnabled = opcoes.Responsive ~= false
+	self._fireOnRestore = opcoes.FireCallbacks ~= false
 	self._minimized = false
 	self._minToken = 0
-	self._autoSave = false
+	self._autoSave = opcoes.AutoSave == true
 	self._capturingKey = false
-	self._configFile = "FrankHub_Default.json"
+	self._openPopup = nil
+	-- Config separado por hub e por jogo.
+	self._configFile = tostring(opcoes.ConfigFile or string.format("FrankHub_%s_%s.json", Slug(nomeDoHub), tostring(game.PlaceId)))
 	self._menuKey = NormalizeKey(opcoes.MenuKey) or Enum.KeyCode.RightShift
 
 	for name, theme in pairs(THEMES) do
@@ -1196,20 +1529,21 @@ function HubLibrary:Destroy()
 	self:Fire("Destroyed")
 	self._destroyed = true
 
-	-- Desconecta eventos globais dos controles (keybind, slider...).
+	-- Desconecta eventos globais de controles e abas.
 	for _, entry in ipairs(self._registry) do
 		local control = entry.Control
 		if control then
 			DisconnectAll(control._conns)
 			DisconnectAll(control._dragConns)
+			DisconnectAll(control._dyn)
 		end
+	end
+	for _, tab in ipairs(self.Abas) do
+		DisconnectAll(tab._conns)
+		tab._destroyed = true
 	end
 
 	DisconnectAll(self._conns)
-
-	for _, tab in ipairs(self.Abas) do
-		tab._destroyed = true
-	end
 
 	if self.ScreenGui then
 		self.ScreenGui:Destroy()
@@ -1229,6 +1563,7 @@ function HubLibrary:Destroy()
 	self._themed = {}
 	self._events = {}
 	self._stateListeners = {}
+	self._openPopup = nil
 	self.ScreenGui = nil
 	self.BackGround = nil
 	self._tooltip = nil
@@ -1263,8 +1598,11 @@ function HubLibrary:SetVisible(visible)
 	visible = visible ~= false
 	self.BackGround.Visible = visible
 	self._fab.Visible = not visible
-	if not visible and self._tooltip then
-		self._tooltip.Visible = false
+	if not visible then
+		self:_ClosePopup()
+		if self._tooltip then
+			self._tooltip.Visible = false
+		end
 	end
 	self:Fire("VisibilityChanged", visible)
 	return visible
@@ -1301,6 +1639,7 @@ function HubLibrary:Minimizar(force)
 	self._minimized = minimize
 	self._minToken = self._minToken + 1
 	local token = self._minToken
+	self:_ClosePopup()
 
 	if minimize then
 		self._body.Visible = false
@@ -1369,6 +1708,7 @@ function HubLibrary:_ApplySearch()
 	local query = string.lower(tostring(self._searchQuery or ""))
 	query = query:match("^%s*(.-)%s*$") or ""
 
+	local counts = {}
 	for _, entry in ipairs(self._registry) do
 		local object = entry.Object
 		if object and object.Parent then
@@ -1383,7 +1723,26 @@ function HubLibrary:_ApplySearch()
 			end
 			entry.Visible = matched
 			object.Visible = matched and not entry.ForceHidden
+			if matched and not entry.ForceHidden and entry.Kind ~= "Section" and entry.Kind ~= "Spacer" then
+				counts[entry.Tab] = (counts[entry.Tab] or 0) + 1
+			end
 		end
+	end
+
+	-- Contagem por aba e estado "Nenhum resultado".
+	for _, tab in ipairs(self.Abas) do
+		local n = counts[tab] or 0
+		if query ~= "" then
+			tab.Btn.Text = tab.Name .. (n > 0 and (" (" .. n .. ")") or "")
+			tab.Btn.TextTransparency = n > 0 and 0 or 0.55
+		else
+			tab.Btn.Text = tab.Name
+			tab.Btn.TextTransparency = 0
+		end
+	end
+	if self._noResults then
+		local active = self.AbaAtiva
+		self._noResults.Visible = query ~= "" and active ~= nil and (counts[active] or 0) == 0
 	end
 end
 
@@ -1441,6 +1800,8 @@ function HubLibrary:SelecionarAba(aba)
 		return
 	end
 
+	self:_ClosePopup()
+
 	local previous = self.AbaAtiva
 	for _, other in ipairs(self.Abas) do
 		local active = other == aba
@@ -1458,12 +1819,16 @@ function HubLibrary:SelecionarAba(aba)
 		self:Tween(aba.Scroll, { Position = UDim2.fromOffset(0, 0) }, 0.18, Enum.EasingStyle.Quint)
 	end
 
+	self:_ApplySearch()
 	self:Fire("TabChanged", aba, previous)
 end
 
 function HubLibrary:AddTab(nomeDaAba)
 	if self._destroyed then
 		return nil
+	end
+	if type(nomeDaAba) == "table" then
+		nomeDaAba = Pick(nomeDaAba, "Name", "Title")
 	end
 	nomeDaAba = tostring(nomeDaAba or "Tab")
 
@@ -1514,6 +1879,7 @@ function HubLibrary:AddTab(nomeDaAba)
 		_order = 0,
 		_active = false,
 		_destroyed = false,
+		_conns = {},
 	}, Tab)
 
 	tab._paintButton = function()
@@ -1530,15 +1896,15 @@ function HubLibrary:AddTab(nomeDaAba)
 		if not tab._active then
 			button.BackgroundColor3 = self._theme.AccentHover
 		end
-	end)
+	end, tab)
 	self:_Conn(button.MouseLeave, function()
 		tab._paintButton()
-	end)
+	end, tab)
 	self:_Conn(button.MouseButton1Click, function()
 		if not self._destroyed and not tab._destroyed then
 			self:SelecionarAba(tab)
 		end
-	end)
+	end, tab)
 
 	table.insert(self.Abas, tab)
 	if #self.Abas == 1 then
@@ -1550,6 +1916,10 @@ end
 function Tab:_StyleButton(active)
 	self._active = active
 	self._paintButton()
+end
+
+function Tab:Select()
+	self._hub:SelecionarAba(self)
 end
 
 function Tab:Destroy()
@@ -1569,6 +1939,8 @@ function Tab:Destroy()
 			end
 		end
 	end
+
+	DisconnectAll(self._conns)
 
 	local index = table.find(hub.Abas, self)
 	if index then
@@ -1655,7 +2027,8 @@ function Tab:_Register(control, kind, title, opts)
 	local hub = self._hub
 
 	local entry = {
-		Id = hub:_MakeId(self.Name, title, opts.Id),
+		-- Prioridade do id: Id explicito > Flag/StateKey > aba_titulo.
+		Id = hub:_MakeId(self.Name, title, opts.Id or opts.StateKey),
 		Kind = kind,
 		Control = control,
 		Object = control.Object,
@@ -1685,6 +2058,13 @@ function Tab:_Register(control, kind, title, opts)
 		hub:_Unregister(entry)
 		DisconnectAll(control._conns)
 		DisconnectAll(control._dragConns)
+		DisconnectAll(control._dyn)
+		if self.Scroll and self.Scroll.Parent then
+			self.Scroll.ScrollingEnabled = true
+		end
+		if hub._openPopup == control then
+			hub._openPopup = nil
+		end
 		if stateBinding then
 			stateBinding.Disconnect()
 			stateBinding = nil
@@ -1700,22 +2080,24 @@ function Tab:_Register(control, kind, title, opts)
 
 	-- Tooltip no card e tambem no botao interno (que pode cobrir o card).
 	if opts.Description and control.Object then
-		hub:AddTooltip(control.Object, opts.Description)
+		hub:AddTooltip(control.Object, opts.Description, control)
 		if control.Button and control.Button ~= control.Object then
-			hub:AddTooltip(control.Button, opts.Description)
+			hub:AddTooltip(control.Button, opts.Description, control)
 		end
 	end
 
 	local stateKey = opts.StateKey and tostring(opts.StateKey) or nil
 	if stateKey and control.Get and control.Set then
 		control.StateKey = stateKey
+		-- Valor ja existente no state: aplica e (por padrao) dispara o callback.
 		if hub._state[stateKey] ~= nil then
-			control:Set(hub._state[stateKey], true)
+			control:Set(hub._state[stateKey], not hub._fireOnRestore)
 		else
 			hub._state[stateKey] = control:Get()
 		end
 		stateBinding = hub:BindState(stateKey, function(value)
-			control:Set(value, true)
+			-- Mudanca vinda de fora (SetState/outro controle): dispara callback.
+			control:Set(value)
 		end)
 	end
 
@@ -1747,6 +2129,17 @@ function Tab:AddToggle(texto, callback, valorInicial, descricao, stateKey)
 		return nil
 	end
 	local hub = self._hub
+	local id
+	if type(texto) == "table" then
+		local o = texto
+		texto = Pick(o, "Name", "Title", "Text")
+		callback = o.Callback
+		valorInicial = Pick(o, "Default", "Value")
+		descricao = o.Description
+		stateKey = Pick(o, "Flag", "StateKey")
+		id = o.Id
+	end
+
 	local card = self:_NewCard(46, "Toggle")
 
 	local hit = New("TextButton", {
@@ -1823,12 +2216,13 @@ function Tab:AddToggle(texto, callback, valorInicial, descricao, stateKey)
 
 	hub:_Conn(hit.MouseButton1Click, function()
 		apply(not active)
-	end)
+	end, control)
 
 	return self:_Register(control, "Toggle", texto, {
 		Description = descricao,
 		Default = active,
 		StateKey = stateKey,
+		Id = id,
 	})
 end
 
@@ -1841,6 +2235,19 @@ function Tab:AddSlider(texto, valorMin, valorMax, valorPadrao, callback, descric
 		return nil
 	end
 	local hub = self._hub
+	local id
+	if type(texto) == "table" then
+		local o = texto
+		texto = Pick(o, "Name", "Title", "Text")
+		valorMin = o.Min
+		valorMax = o.Max
+		valorPadrao = Pick(o, "Default", "Value")
+		callback = o.Callback
+		descricao = o.Description
+		stateKey = Pick(o, "Flag", "StateKey")
+		passo = Pick(o, "Step", "Increment")
+		id = o.Id
+	end
 
 	local min = tonumber(valorMin) or 0
 	local max = tonumber(valorMax) or 100
@@ -1971,53 +2378,13 @@ function Tab:AddSlider(texto, valorMin, valorMax, valorPadrao, callback, descric
 		return value
 	end
 
-	local function fromX(x)
+	hub:_BindDrag(control, hit, self.Scroll, function(position)
 		local width = track.AbsoluteSize.X
 		if width <= 0 then
 			return
 		end
-		local pct = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
+		local pct = math.clamp((position.X - track.AbsolutePosition.X) / width, 0, 1)
 		apply(min + (max - min) * pct)
-	end
-
-	hub:_Conn(hit.InputBegan, function(input)
-		if input.UserInputType ~= Enum.UserInputType.MouseButton1
-			and input.UserInputType ~= Enum.UserInputType.Touch then
-			return
-		end
-
-		-- evita duas sessoes de arraste simultaneas
-		DisconnectAll(control._dragConns)
-
-		local isTouch = input.UserInputType == Enum.UserInputType.Touch
-		local page = self.Scroll
-		page.ScrollingEnabled = false
-		fromX(input.Position.X)
-
-		local function stop()
-			DisconnectAll(control._dragConns)
-			if page.Parent then
-				page.ScrollingEnabled = true
-			end
-		end
-
-		table.insert(control._dragConns, UserInputService.InputChanged:Connect(function(changed)
-			local isMove
-			if isTouch then
-				isMove = changed == input
-			else
-				isMove = changed.UserInputType == Enum.UserInputType.MouseMovement
-			end
-			if isMove then
-				fromX(changed.Position.X)
-			end
-		end))
-
-		table.insert(control._dragConns, UserInputService.InputEnded:Connect(function(ended)
-			if ended == input or (not isTouch and ended.UserInputType == Enum.UserInputType.MouseButton1) then
-				stop()
-			end
-		end))
 	end)
 
 	render()
@@ -2026,34 +2393,45 @@ function Tab:AddSlider(texto, valorMin, valorMax, valorPadrao, callback, descric
 		Description = descricao,
 		Default = value,
 		StateKey = stateKey,
+		Id = id,
 	})
 end
 
 --==================================================
--- DROPDOWN
+-- DROPDOWN (simples e multiplo, com busca opcional)
 --==================================================
 
-function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, stateKey)
-	if self._destroyed then
-		return nil
-	end
+function Tab:_BuildDropdown(multi, cfg)
 	local hub = self._hub
+	local texto = cfg.texto
+	local extra = type(cfg.extra) == "table" and cfg.extra or {}
+	local callback = cfg.callback
+	local CARD_H, ROW_H, MAX_ROWS, SEARCH_ROW = 46, 28, 5, 34
 
-	local CARD_H, ROW_H, MAX_ROWS = 46, 28, 5
+	local searchPref = extra.Search
+	if searchPref == nil then
+		searchPref = extra.Searchable
+	end
 
-	local options = {}
-	if type(opcoes) == "table" then
-		for _, option in ipairs(opcoes) do
-			table.insert(options, option)
+	local options = CopyList(cfg.opcoes)
+	local current = nil
+	local selected = {}
+	if multi then
+		local initial = cfg.valorInicial
+		if type(initial) ~= "table" then
+			initial = (initial ~= nil) and { initial } or {}
+		end
+		for _, value in ipairs(initial) do
+			selected[value] = true
+		end
+	else
+		current = cfg.valorInicial
+		if current == nil then
+			current = options[1]
 		end
 	end
 
-	local current = valorInicial
-	if current == nil then
-		current = options[1]
-	end
-
-	local card = self:_NewCard(CARD_H, "Dropdown")
+	local card = self:_NewCard(CARD_H, multi and "MultiDropdown" or "Dropdown")
 	card.ClipsDescendants = true
 	self:_Title(card, texto, -176, CARD_H)
 
@@ -2092,6 +2470,28 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 		FontFace = FONT_BOLD,
 	}, button)
 
+	local searchFrame = New("Frame", {
+		Name = "SearchFrame",
+		Position = UDim2.fromOffset(12, CARD_H),
+		Size = UDim2.new(1, -24, 0, 28),
+		BorderSizePixel = 0,
+		Visible = false,
+	}, card)
+	Corner(searchFrame, 4)
+	local searchStroke = Stroke(searchFrame, 2)
+	local searchBox = New("TextBox", {
+		Name = "Input",
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(1, -16, 1, 0),
+		BackgroundTransparency = 1,
+		ClearTextOnFocus = false,
+		PlaceholderText = "Buscar...",
+		Text = "",
+		TextSize = 15,
+		FontFace = FONT_REG,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, searchFrame)
+
 	local list = New("ScrollingFrame", {
 		Name = "ContainerOpcoes",
 		Position = UDim2.fromOffset(12, CARD_H),
@@ -2107,14 +2507,31 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 	New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, list)
 
 	local optionButtons = {}
-	local optionConns = {}
 	local opened = false
-	local control = { Object = card, Button = button }
+	local filter = ""
+	local control = { Object = card, Button = button, _dyn = {} }
+
+	local function isSelected(value)
+		if multi then
+			return selected[value] == true
+		end
+		return value == current
+	end
+
+	local function selectedList()
+		local out = {}
+		for _, option in ipairs(options) do
+			if selected[option] then
+				table.insert(out, option)
+			end
+		end
+		return out
+	end
 
 	local function paintOptions()
 		local t = hub._theme
 		for _, item in ipairs(optionButtons) do
-			item.Button.BackgroundColor3 = (item.Value == current) and t.Accent or t.Control
+			item.Button.BackgroundColor3 = isSelected(item.Value) and t.Accent or t.Control
 			item.Button.TextColor3 = t.Text
 		end
 	end
@@ -2124,25 +2541,86 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 		buttonStroke.Color = t.Border
 		selectedLabel.TextColor3 = t.Text
 		arrow.TextColor3 = t.Accent
+		searchFrame.BackgroundColor3 = t.Control
+		searchStroke.Color = t.Border
+		searchBox.TextColor3 = t.Text
+		searchBox.PlaceholderColor3 = t.MutedText
 		list.BackgroundColor3 = t.Control
 		list.ScrollBarImageColor3 = t.Accent
 		paintOptions()
 	end)
 
 	local function updateText()
-		selectedLabel.Text = current ~= nil and tostring(current) or "Select..."
+		if multi then
+			local items = selectedList()
+			if #items == 0 then
+				selectedLabel.Text = "Nenhum"
+			elseif #items <= 2 then
+				local names = {}
+				for _, item in ipairs(items) do
+					table.insert(names, tostring(item))
+				end
+				selectedLabel.Text = table.concat(names, ", ")
+			else
+				selectedLabel.Text = tostring(#items) .. " selecionados"
+			end
+		else
+			selectedLabel.Text = current ~= nil and tostring(current) or "Select..."
+		end
+	end
+
+	local function matches(option)
+		return filter == "" or string.find(string.lower(tostring(option)), filter, 1, true) ~= nil
+	end
+
+	local function hasSearch()
+		if searchPref == nil then
+			return #options > 8
+		end
+		return searchPref == true
 	end
 
 	local function resize()
-		local listHeight = math.min(#options, MAX_ROWS) * ROW_H
+		local searchOn = opened and hasSearch()
+		local visibleCount = 0
+		for _, item in ipairs(optionButtons) do
+			local show = matches(item.Value)
+			item.Button.Visible = show
+			if show then
+				visibleCount = visibleCount + 1
+			end
+		end
+		local listHeight = math.min(visibleCount, MAX_ROWS) * ROW_H
+		local listY = CARD_H + (searchOn and SEARCH_ROW or 0)
+		searchFrame.Visible = searchOn
+		list.Position = UDim2.fromOffset(12, listY)
 		list.Size = UDim2.new(1, -24, 0, listHeight)
-		list.Visible = opened and #options > 0
+		list.Visible = opened and visibleCount > 0
 		arrow.Text = opened and "^" or "v"
-		local target = opened and (CARD_H + listHeight + 10) or CARD_H
+		local target = CARD_H
+		if opened then
+			target = listY + listHeight + 10
+		end
 		hub:Tween(card, { Size = UDim2.new(1, 0, 0, target) }, 0.16)
 		if hub._animations == false then
 			card.Size = UDim2.new(1, 0, 0, target)
 		end
+	end
+
+	local function setOpened(state)
+		if state and #options == 0 then
+			return
+		end
+		opened = state
+		if opened then
+			hub:_SetOpenPopup(control)
+		elseif hub._openPopup == control then
+			hub._openPopup = nil
+		end
+		if not opened and searchBox.Text ~= "" then
+			searchBox.Text = ""
+		end
+		resize()
 	end
 
 	local function setCurrent(value, silent)
@@ -2157,8 +2635,19 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 		end
 	end
 
+	local function toggleOption(option)
+		if selected[option] then
+			selected[option] = nil
+		else
+			selected[option] = true
+		end
+		updateText()
+		paintOptions()
+		self:_Changed(control, callback, selectedList())
+	end
+
 	local function buildOptions()
-		DisconnectAll(optionConns)
+		DisconnectAll(control._dyn)
 		for _, item in ipairs(optionButtons) do
 			item.Button:Destroy()
 		end
@@ -2180,16 +2669,19 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 			New("UIPadding", { PaddingLeft = UDim.new(0, 8) }, optionButton)
 			table.insert(optionButtons, { Button = optionButton, Value = option })
 
-			table.insert(optionConns, optionButton.MouseEnter:Connect(function()
+			table.insert(control._dyn, optionButton.MouseEnter:Connect(function()
 				optionButton.BackgroundColor3 = hub._theme.ControlHover
 			end))
-			table.insert(optionConns, optionButton.MouseLeave:Connect(function()
+			table.insert(control._dyn, optionButton.MouseLeave:Connect(function()
 				paintOptions()
 			end))
-			table.insert(optionConns, optionButton.MouseButton1Click:Connect(function()
-				setCurrent(option)
-				opened = false
-				resize()
+			table.insert(control._dyn, optionButton.MouseButton1Click:Connect(function()
+				if multi then
+					toggleOption(option)
+				else
+					setCurrent(option)
+					setOpened(false)
+				end
 			end))
 		end
 
@@ -2198,37 +2690,71 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 	end
 
 	hub:_Conn(button.MouseButton1Click, function()
-		if #options == 0 then
-			return
-		end
-		opened = not opened
-		resize()
-	end)
+		setOpened(not opened)
+	end, control)
 
-	control.Set = function(_, value, silent)
-		setCurrent(value, silent)
-	end
-	control.Get = function()
-		return current
-	end
-	control.Open = function()
-		if #options > 0 then
-			opened = true
-			resize()
-		end
-	end
-	control.Close = function()
-		opened = false
+	hub:_Conn(searchBox:GetPropertyChangedSignal("Text"), function()
+		filter = string.lower(searchBox.Text):match("^%s*(.-)%s*$") or ""
 		resize()
-	end
-	control.SetOptions = function(_, newOptions)
-		options = {}
-		if type(newOptions) == "table" then
-			for _, option in ipairs(newOptions) do
-				table.insert(options, option)
+	end, control)
+
+	if multi then
+		control.Set = function(_, value, silent)
+			local list_ = type(value) == "table" and value or ((value ~= nil) and { value } or {})
+			local newSet = {}
+			for _, item in ipairs(list_) do
+				if table.find(options, item) then
+					newSet[item] = true
+				end
+			end
+			local same = true
+			for _, option in ipairs(options) do
+				if (newSet[option] == true) ~= (selected[option] == true) then
+					same = false
+					break
+				end
+			end
+			if same then
+				return
+			end
+			selected = newSet
+			updateText()
+			paintOptions()
+			if not silent then
+				self:_Changed(control, callback, selectedList())
 			end
 		end
-		if current ~= nil and not table.find(options, current) then
+		control.Get = selectedList
+		control.SelectAll = function()
+			control:Set(options)
+		end
+		control.Clear = function()
+			control:Set({})
+		end
+	else
+		control.Set = function(_, value, silent)
+			setCurrent(value, silent)
+		end
+		control.Get = function()
+			return current
+		end
+	end
+
+	control.Open = function()
+		setOpened(true)
+	end
+	control.Close = function()
+		setOpened(false)
+	end
+	control.SetOptions = function(_, newOptions)
+		options = CopyList(newOptions)
+		if multi then
+			for value in pairs(selected) do
+				if not table.find(options, value) then
+					selected[value] = nil
+				end
+			end
+		elseif current ~= nil and not table.find(options, current) then
 			current = options[1]
 		end
 		updateText()
@@ -2240,15 +2766,450 @@ function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, state
 	control.GetOptions = function()
 		return table.clone(options)
 	end
-	control._dragConns = optionConns -- desconectadas junto com o controle
 
 	updateText()
 	buildOptions()
 
-	return self:_Register(control, "Dropdown", texto, {
+	return self:_Register(control, multi and "MultiDropdown" or "Dropdown", texto, {
+		Description = cfg.descricao,
+		Default = multi and selectedList() or current,
+		StateKey = cfg.stateKey,
+		Id = cfg.id,
+	})
+end
+
+function Tab:AddDropdown(texto, opcoes, callback, valorInicial, descricao, stateKey, extra)
+	if self._destroyed then
+		return nil
+	end
+	local cfg = {
+		texto = texto,
+		opcoes = opcoes,
+		callback = callback,
+		valorInicial = valorInicial,
+		descricao = descricao,
+		stateKey = stateKey,
+		extra = extra,
+	}
+	if type(texto) == "table" then
+		local o = texto
+		cfg = {
+			texto = Pick(o, "Name", "Title", "Text"),
+			opcoes = Pick(o, "Options", "Values"),
+			callback = o.Callback,
+			valorInicial = Pick(o, "Default", "Value"),
+			descricao = o.Description,
+			stateKey = Pick(o, "Flag", "StateKey"),
+			extra = o,
+			id = o.Id,
+		}
+	end
+	return self:_BuildDropdown(false, cfg)
+end
+
+function Tab:AddMultiDropdown(texto, opcoes, callback, valoresIniciais, descricao, stateKey, extra)
+	if self._destroyed then
+		return nil
+	end
+	local cfg = {
+		texto = texto,
+		opcoes = opcoes,
+		callback = callback,
+		valorInicial = valoresIniciais,
+		descricao = descricao,
+		stateKey = stateKey,
+		extra = extra,
+	}
+	if type(texto) == "table" then
+		local o = texto
+		cfg = {
+			texto = Pick(o, "Name", "Title", "Text"),
+			opcoes = Pick(o, "Options", "Values"),
+			callback = o.Callback,
+			valorInicial = Pick(o, "Default", "Value"),
+			descricao = o.Description,
+			stateKey = Pick(o, "Flag", "StateKey"),
+			extra = o,
+			id = o.Id,
+		}
+	end
+	return self:_BuildDropdown(true, cfg)
+end
+
+--==================================================
+-- INPUT (texto / numero com validacao)
+--==================================================
+
+function Tab:AddInput(texto, callback, valorInicial, descricao, stateKey, extra)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	local id
+	if type(texto) == "table" then
+		local o = texto
+		extra = o
+		texto = Pick(o, "Name", "Title", "Text")
+		callback = o.Callback
+		valorInicial = Pick(o, "Default", "Value")
+		descricao = o.Description
+		stateKey = Pick(o, "Flag", "StateKey")
+		id = o.Id
+	end
+	extra = type(extra) == "table" and extra or {}
+
+	local numeric = extra.Numeric == true
+	local min, max = tonumber(extra.Min), tonumber(extra.Max)
+
+	local function normalize(v)
+		if numeric then
+			local n = tonumber(v)
+			if not n then
+				return nil
+			end
+			if min then
+				n = math.max(n, min)
+			end
+			if max then
+				n = math.min(n, max)
+			end
+			return n
+		end
+		if v == nil then
+			return ""
+		end
+		return tostring(v)
+	end
+
+	local value = normalize(valorInicial)
+	if value == nil then
+		value = min or 0
+	end
+
+	local card = self:_NewCard(46, "Input")
+	self:_Title(card, texto, -176, 46)
+
+	local frame = New("Frame", {
+		Name = "InputFrame",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 8),
+		Size = UDim2.fromOffset(150, 30),
+		BorderSizePixel = 0,
+	}, card)
+	Corner(frame, 4)
+	local frameStroke = Stroke(frame, 2)
+
+	local box = New("TextBox", {
+		Name = "Box",
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(1, -16, 1, 0),
+		BackgroundTransparency = 1,
+		ClearTextOnFocus = extra.ClearOnFocus == true,
+		PlaceholderText = tostring(extra.Placeholder or (numeric and "Numero..." or "Texto...")),
+		Text = tostring(value),
+		TextSize = 16,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, frame)
+	hub:_Themed(frame, function(t)
+		frame.BackgroundColor3 = t.Control
+		frameStroke.Color = t.Border
+		box.TextColor3 = t.Text
+		box.PlaceholderColor3 = t.MutedText
+	end)
+
+	local control = { Object = card, Button = box }
+
+	local function apply(v, silent)
+		local normalized = normalize(v)
+		if normalized == nil then
+			box.Text = tostring(value)
+			return
+		end
+		box.Text = tostring(normalized)
+		if normalized == value then
+			return
+		end
+		value = normalized
+		if not silent then
+			self:_Changed(control, callback, value)
+		end
+	end
+
+	control.Set = function(_, v, silent)
+		apply(v, silent)
+	end
+	control.Get = function()
+		return value
+	end
+
+	-- O callback roda ao confirmar (Enter) ou ao sair da caixa.
+	hub:_Conn(box.FocusLost, function()
+		apply(box.Text)
+	end, control)
+
+	return self:_Register(control, "Input", texto, {
 		Description = descricao,
-		Default = current,
+		Default = value,
 		StateKey = stateKey,
+		Id = id,
+	})
+end
+
+--==================================================
+-- COLOR PICKER
+--==================================================
+
+function Tab:AddColorPicker(texto, callback, corInicial, descricao, stateKey)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	local id
+	if type(texto) == "table" then
+		local o = texto
+		texto = Pick(o, "Name", "Title", "Text")
+		callback = o.Callback
+		corInicial = Pick(o, "Default", "Value", "Color")
+		descricao = o.Description
+		stateKey = Pick(o, "Flag", "StateKey")
+		id = o.Id
+	end
+
+	local CARD_H, PICK_H = 46, 110
+	local color = ParseColor(corInicial) or Color3.fromRGB(255, 255, 255)
+	local h, s, v = color:ToHSV()
+
+	local card = self:_NewCard(CARD_H, "ColorPicker")
+	card.ClipsDescendants = true
+	self:_Title(card, texto, -172, CARD_H)
+
+	local swatch = New("TextButton", {
+		Name = "Swatch",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 8),
+		Size = UDim2.fromOffset(56, 30),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = "",
+	}, card)
+	Corner(swatch, 4)
+	local swatchStroke = Stroke(swatch, 2)
+
+	local hexLabel = New("TextLabel", {
+		Name = "Hex",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -76, 0, 8),
+		Size = UDim2.fromOffset(84, 30),
+		BackgroundTransparency = 1,
+		TextSize = 15,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, card)
+	hub:_T(hexLabel, "TextColor3", "MutedText")
+
+	-- Quadrado saturacao/brilho
+	local sv = New("Frame", {
+		Name = "SV",
+		Position = UDim2.fromOffset(12, CARD_H),
+		Size = UDim2.new(1, -52, 0, PICK_H),
+		BorderSizePixel = 0,
+	}, card)
+	Corner(sv, 4)
+	local white = New("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+	}, sv)
+	Corner(white, 4)
+	New("UIGradient", {
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(1, 1),
+		}),
+	}, white)
+	local black = New("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BorderSizePixel = 0,
+	}, sv)
+	Corner(black, 4)
+	New("UIGradient", {
+		Rotation = 90,
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(1, 0),
+		}),
+	}, black)
+	local svCursor = New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(12, 12),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ZIndex = 3,
+	}, sv)
+	Corner(svCursor, 6)
+	Stroke(svCursor, 2, Color3.new(1, 1, 1))
+	local svHit = New("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 4,
+	}, sv)
+
+	-- Barra de matiz
+	local hueBar = New("Frame", {
+		Name = "Hue",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, CARD_H),
+		Size = UDim2.fromOffset(20, PICK_H),
+		BorderSizePixel = 0,
+	}, card)
+	Corner(hueBar, 4)
+	New("UIGradient", {
+		Rotation = 90,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+			ColorSequenceKeypoint.new(1 / 6, Color3.fromHSV(1 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(2 / 6, Color3.fromHSV(2 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(3 / 6, Color3.fromHSV(3 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(4 / 6, Color3.fromHSV(4 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(5 / 6, Color3.fromHSV(5 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1)),
+		}),
+	}, hueBar)
+	local hueCursor = New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0),
+		Size = UDim2.new(1, 6, 0, 4),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		ZIndex = 3,
+	}, hueBar)
+	Corner(hueCursor, 2)
+	Stroke(hueCursor, 1.5, Color3.new(0, 0, 0))
+	local hueHit = New("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 4,
+	}, hueBar)
+
+	hub:_Themed(swatch, function(t)
+		swatchStroke.Color = t.Border
+	end)
+
+	local opened = false
+	local control = { Object = card, Button = swatch, _dragConns = {} }
+
+	local function render()
+		swatch.BackgroundColor3 = color
+		hexLabel.Text = ToHex(color)
+		sv.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+		svCursor.Position = UDim2.fromScale(s, 1 - v)
+		hueCursor.Position = UDim2.fromScale(0.5, h)
+	end
+
+	local function resize()
+		local target = opened and (CARD_H + PICK_H + 12) or CARD_H
+		hub:Tween(card, { Size = UDim2.new(1, 0, 0, target) }, 0.16)
+		if hub._animations == false then
+			card.Size = UDim2.new(1, 0, 0, target)
+		end
+	end
+
+	local function setOpened(state)
+		opened = state
+		if opened then
+			hub:_SetOpenPopup(control)
+		elseif hub._openPopup == control then
+			hub._openPopup = nil
+		end
+		resize()
+	end
+
+	local function commitHSV()
+		local newColor = Color3.fromHSV(h, s, v)
+		render()
+		if newColor ~= color then
+			color = newColor
+			render()
+			self:_Changed(control, callback, color)
+		end
+	end
+
+	control.Set = function(_, value, silent)
+		local parsed = ParseColor(value)
+		if not parsed or parsed == color then
+			return
+		end
+		color = parsed
+		local nh, ns, nv = parsed:ToHSV()
+		-- Preserva o matiz quando ele e indefinido (cinza/preto).
+		if ns > 0 and nv > 0 then
+			h = nh
+		end
+		s, v = ns, nv
+		render()
+		if not silent then
+			self:_Changed(control, callback, color)
+		end
+	end
+	control.Get = function()
+		return color
+	end
+	control.GetHex = function()
+		return ToHex(color)
+	end
+	control.Open = function()
+		setOpened(true)
+	end
+	control.Close = function()
+		setOpened(false)
+	end
+	-- Color3 nao e JSON: salvamos o hexadecimal.
+	control._serialize = function()
+		return ToHex(color)
+	end
+	control._deserialize = function(value, silent)
+		control:Set(value, silent)
+	end
+
+	hub:_Conn(swatch.MouseButton1Click, function()
+		setOpened(not opened)
+	end, control)
+
+	hub:_BindDrag(control, svHit, self.Scroll, function(position)
+		local point = ScreenPoint(position)
+		local size = sv.AbsoluteSize
+		if size.X <= 0 or size.Y <= 0 then
+			return
+		end
+		s = math.clamp((point.X - sv.AbsolutePosition.X) / size.X, 0, 1)
+		v = 1 - math.clamp((point.Y - sv.AbsolutePosition.Y) / size.Y, 0, 1)
+		commitHSV()
+	end)
+
+	hub:_BindDrag(control, hueHit, self.Scroll, function(position)
+		local point = ScreenPoint(position)
+		local size = hueBar.AbsoluteSize
+		if size.Y <= 0 then
+			return
+		end
+		h = math.clamp((point.Y - hueBar.AbsolutePosition.Y) / size.Y, 0, 0.999)
+		commitHSV()
+	end)
+
+	render()
+
+	return self:_Register(control, "ColorPicker", texto, {
+		Description = descricao,
+		Default = ToHex(color),
+		StateKey = stateKey,
+		Id = id,
 	})
 end
 
@@ -2261,6 +3222,13 @@ function Tab:AddInfoCard(tituloCard, iconeId, listaDeTextos, descricao)
 		return nil
 	end
 	local hub = self._hub
+	if type(tituloCard) == "table" then
+		local o = tituloCard
+		tituloCard = Pick(o, "Title", "Name")
+		iconeId = Pick(o, "Icon", "Image")
+		listaDeTextos = Pick(o, "Lines", "Texts")
+		descricao = o.Description
+	end
 
 	local lines = {}
 	if type(listaDeTextos) == "table" then
@@ -2361,14 +3329,24 @@ function Tab:AddInfoCard(tituloCard, iconeId, listaDeTextos, descricao)
 end
 
 --==================================================
--- BOTAO
+-- BOTAO (com confirmacao opcional)
 --==================================================
 
-function Tab:AddButton(texto, callback, descricao)
+function Tab:AddButton(texto, callback, descricao, confirmar)
 	if self._destroyed then
 		return nil
 	end
 	local hub = self._hub
+	if type(texto) == "table" then
+		local o = texto
+		texto = Pick(o, "Name", "Title", "Text")
+		callback = o.Callback
+		descricao = o.Description
+		confirmar = o.Confirm
+	end
+
+	local label = tostring(texto)
+	local armed, token = false, 0
 
 	self._order = self._order + 1
 	local button = New("TextButton", {
@@ -2377,7 +3355,7 @@ function Tab:AddButton(texto, callback, descricao)
 		Size = UDim2.new(1, 0, 0, 40),
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
-		Text = tostring(texto),
+		Text = label,
 		TextSize = 18,
 		FontFace = FONT_BOLD,
 	}, self.Scroll)
@@ -2386,22 +3364,49 @@ function Tab:AddButton(texto, callback, descricao)
 	hub:_Themed(button, function(t)
 		button.BackgroundColor3 = t.Control
 		button.TextColor3 = t.Text
-		stroke.Color = t.Border
+		stroke.Color = armed and t.Danger or t.Border
 	end)
-	hub:_Hover(button, "Control", "ControlHover")
 
 	local control = { Object = button, Button = button }
+	hub:_Hover(button, "Control", "ControlHover", control)
+
+	local function disarm()
+		armed = false
+		token = token + 1
+		button.Text = label
+		stroke.Color = hub._theme.Border
+	end
+
 	control.SetText = function(_, text)
-		button.Text = tostring(text)
+		label = tostring(text)
+		if not armed then
+			button.Text = label
+		end
 		if control._entry then
-			control._entry.Title = tostring(text)
+			control._entry.Title = label
 		end
 	end
 
 	hub:_Conn(button.MouseButton1Click, function()
+		if confirmar and not armed then
+			armed = true
+			token = token + 1
+			local mine = token
+			button.Text = "Confirmar? Clique de novo"
+			stroke.Color = hub._theme.Danger
+			task.delay(3, function()
+				if armed and token == mine and button.Parent then
+					disarm()
+				end
+			end)
+			return
+		end
+		if armed then
+			disarm()
+		end
 		Call(callback)
 		hub:Fire("ButtonPressed", control)
-	end)
+	end, control)
 
 	return self:_Register(control, "Button", texto, { Description = descricao, Persist = false })
 end
@@ -2417,6 +3422,17 @@ function Tab:AddKeybind(texto, teclaInicial, callback, descricao, onChanged)
 		return nil
 	end
 	local hub = self._hub
+	local id
+	if type(texto) == "table" then
+		local o = texto
+		texto = Pick(o, "Name", "Title", "Text")
+		teclaInicial = Pick(o, "Key", "Default")
+		callback = o.Callback
+		descricao = o.Description
+		onChanged = Pick(o, "Changed", "OnChanged")
+		id = Pick(o, "Flag", "Id")
+	end
+
 	local card = self:_NewCard(46, "Keybind")
 	self:_Title(card, texto, -140)
 
@@ -2463,11 +3479,22 @@ function Tab:AddKeybind(texto, teclaInicial, callback, descricao, onChanged)
 
 	update()
 
+	-- Se o controle for destruido durante a captura, libera o hub
+	-- (senao a tecla do menu e os outros keybinds ficariam travados).
+	table.insert(control._conns, {
+		Disconnect = function()
+			if listening then
+				listening = false
+				hub._capturingKey = false
+			end
+		end,
+	})
+
 	hub:_Conn(keyButton.MouseButton1Click, function()
 		listening = true
 		hub._capturingKey = true
 		update()
-	end)
+	end, control)
 
 	hub:_Conn(UserInputService.InputBegan, function(input, processed)
 		if hub._destroyed or input.UserInputType ~= Enum.UserInputType.Keyboard then
@@ -2476,8 +3503,7 @@ function Tab:AddKeybind(texto, teclaInicial, callback, descricao, onChanged)
 		if listening then
 			listening = false
 			-- Libera a captura so no proximo frame, para que os outros
-			-- handlers deste mesmo evento (tecla do menu, outros keybinds)
-			-- ainda vejam _capturingKey = true e ignorem a tecla.
+			-- handlers deste mesmo evento ainda ignorem a tecla.
 			task.defer(function()
 				hub._capturingKey = false
 			end)
@@ -2514,11 +3540,12 @@ function Tab:AddKeybind(texto, teclaInicial, callback, descricao, onChanged)
 	return self:_Register(control, "Keybind", texto, {
 		Description = descricao,
 		Default = key.Name,
+		Id = id,
 	})
 end
 
 --==================================================
--- SECAO / LABEL / ESPACADOR / CUSTOM
+-- SECAO / LABEL / PARAGRAFO / PROGRESSO / ESPACADOR / CUSTOM
 --==================================================
 
 function Tab:AddSection(title, subtitle)
@@ -2526,6 +3553,11 @@ function Tab:AddSection(title, subtitle)
 		return nil
 	end
 	local hub = self._hub
+	if type(title) == "table" then
+		local o = title
+		title = Pick(o, "Name", "Title")
+		subtitle = Pick(o, "Subtitle", "Description")
+	end
 	self._order = self._order + 1
 
 	local frame = New("Frame", {
@@ -2578,6 +3610,11 @@ function Tab:AddLabel(text, description)
 		return nil
 	end
 	local hub = self._hub
+	if type(text) == "table" then
+		local o = text
+		text = Pick(o, "Name", "Text", "Title")
+		description = o.Description
+	end
 	local card = self:_NewCard(description and 48 or 32, "Label")
 
 	local title = New("TextLabel", {
@@ -2625,9 +3662,199 @@ function Tab:AddLabel(text, description)
 	return self:_Register(control, "Label", text, { Persist = false })
 end
 
+-- Texto longo com quebra de linha e altura automatica.
+function Tab:AddParagraph(titulo, texto)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	if type(titulo) == "table" then
+		local o = titulo
+		titulo = Pick(o, "Title", "Name")
+		texto = Pick(o, "Text", "Content", "Description")
+	end
+
+	local card = self:_NewCard(40, "Paragraph")
+	card.Size = UDim2.new(1, 0, 0, 0)
+	card.AutomaticSize = Enum.AutomaticSize.Y
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 8),
+		PaddingBottom = UDim.new(0, 10),
+	}, card)
+	New("UIListLayout", {
+		Padding = UDim.new(0, 3),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, card)
+
+	local titleLabel
+	if titulo and tostring(titulo) ~= "" then
+		titleLabel = New("TextLabel", {
+			Name = "TitleLabel",
+			LayoutOrder = 1,
+			BackgroundTransparency = 1,
+			AutomaticSize = Enum.AutomaticSize.Y,
+			Size = UDim2.new(1, 0, 0, 0),
+			Text = tostring(titulo),
+			TextSize = 17,
+			FontFace = FONT_BOLD,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+		}, card)
+		hub:_T(titleLabel, "TextColor3", "Text")
+	end
+
+	local body = New("TextLabel", {
+		Name = "Body",
+		LayoutOrder = 2,
+		BackgroundTransparency = 1,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 0),
+		Text = tostring(texto or ""),
+		TextSize = 15,
+		FontFace = FONT_REG,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+	}, card)
+	hub:_T(body, "TextColor3", "MutedText")
+
+	local control = { Object = card }
+	control.SetText = function(_, newText)
+		body.Text = tostring(newText)
+		if control._entry then
+			control._entry.Description = tostring(newText)
+		end
+	end
+	control.SetTitle = function(_, newTitle)
+		if titleLabel then
+			titleLabel.Text = tostring(newTitle)
+		end
+		if control._entry then
+			control._entry.Title = tostring(newTitle)
+		end
+	end
+
+	self:_Register(control, "Paragraph", titulo or "paragraph", { Persist = false })
+	-- O texto entra na busca (sem criar tooltip).
+	control._entry.Description = tostring(texto or "")
+	return control
+end
+
+-- Barra de progresso (valor de 0 ate Max; nao entra no config).
+function Tab:AddProgress(texto, valorInicial, descricao, maximo)
+	if self._destroyed then
+		return nil
+	end
+	local hub = self._hub
+	if type(texto) == "table" then
+		local o = texto
+		texto = Pick(o, "Name", "Title", "Text")
+		valorInicial = Pick(o, "Value", "Default")
+		descricao = o.Description
+		maximo = o.Max
+	end
+
+	local max = tonumber(maximo) or 100
+	if max <= 0 then
+		max = 100
+	end
+	local value = math.clamp(tonumber(valorInicial) or 0, 0, max)
+
+	local card = self:_NewCard(54, "Progress")
+	local title = New("TextLabel", {
+		Name = "TitleLabel",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 6),
+		Size = UDim2.new(1, -90, 0, 22),
+		Text = tostring(texto),
+		TextSize = 17,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	hub:_T(title, "TextColor3", "Text")
+
+	local percent = New("TextLabel", {
+		Name = "Percent",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, -12, 0, 6),
+		Size = UDim2.fromOffset(70, 22),
+		TextSize = 17,
+		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, card)
+	hub:_T(percent, "TextColor3", "Accent")
+
+	local track = New("Frame", {
+		Name = "ProgressTrack",
+		Position = UDim2.fromOffset(12, 36),
+		Size = UDim2.new(1, -24, 0, 8),
+		BorderSizePixel = 0,
+	}, card)
+	Corner(track, 4)
+	local trackStroke = Stroke(track, 1.5)
+	local fill = New("Frame", {
+		Name = "Fill",
+		Size = UDim2.new(0, 0, 1, 0),
+		BorderSizePixel = 0,
+	}, track)
+	Corner(fill, 4)
+	hub:_Themed(track, function(t)
+		track.BackgroundColor3 = t.Control
+		trackStroke.Color = t.Border
+		fill.BackgroundColor3 = t.Success
+	end)
+
+	local control = { Object = card }
+
+	local function render(animate)
+		local pct = value / max
+		percent.Text = tostring(math.floor(pct * 100 + 0.5)) .. "%"
+		if animate then
+			hub:Tween(fill, { Size = UDim2.new(pct, 0, 1, 0) }, 0.15)
+		else
+			fill.Size = UDim2.new(pct, 0, 1, 0)
+		end
+	end
+
+	control.Set = function(_, newValue)
+		value = math.clamp(tonumber(newValue) or value, 0, max)
+		render(true)
+	end
+	control.Get = function()
+		return value
+	end
+	control.SetMax = function(_, newMax)
+		newMax = tonumber(newMax)
+		if newMax and newMax > 0 then
+			max = newMax
+			value = math.clamp(value, 0, max)
+			render(false)
+		end
+	end
+	control.SetText = function(_, newText)
+		title.Text = tostring(newText)
+		if control._entry then
+			control._entry.Title = tostring(newText)
+		end
+	end
+
+	render(false)
+
+	-- Sem StateKey/Get-Set persistente: nao participa do config.
+	return self:_Register(control, "Progress", texto, { Description = descricao, Persist = false })
+end
+
 function Tab:AddSpacer(height)
 	if self._destroyed then
 		return nil
+	end
+	if type(height) == "table" then
+		height = height.Height
 	end
 	self._order = self._order + 1
 	local spacer = New("Frame", {
@@ -2641,6 +3868,12 @@ function Tab:AddSpacer(height)
 end
 
 function Tab:AddCustom(instance, title, description)
+	if type(instance) == "table" and typeof(instance.Instance) == "Instance" then
+		local o = instance
+		instance = o.Instance
+		title = Pick(o, "Title", "Name")
+		description = o.Description
+	end
 	if self._destroyed or typeof(instance) ~= "Instance" or not instance:IsA("GuiObject") then
 		return nil
 	end
@@ -2700,15 +3933,42 @@ function HubLibrary:SetEnabled(control, enabled)
 	return not entry.ForceHidden
 end
 
+-- Verifica: itens removidos, ids duplicados, StateKey usada por tipos
+-- diferentes e chaves de state sem nenhum controle ligado.
 function HubLibrary:Validate()
 	local issues = {}
+	local seenIds, keyKinds, controlKeys = {}, {}, {}
+
 	for _, entry in ipairs(self._registry) do
 		if not entry.Object or not entry.Object.Parent then
 			table.insert(issues, "Item removido: " .. tostring(entry.Id))
 		end
+		if seenIds[entry.Id] then
+			table.insert(issues, "Id duplicado: " .. tostring(entry.Id))
+		end
+		seenIds[entry.Id] = true
+
+		local key = entry.Control and entry.Control.StateKey
+		if key then
+			controlKeys[key] = true
+			if keyKinds[key] and keyKinds[key] ~= entry.Kind then
+				table.insert(issues, string.format(
+					"StateKey '%s' usada por tipos diferentes (%s e %s)",
+					key, keyKinds[key], entry.Kind
+				))
+			end
+			keyKinds[key] = keyKinds[key] or entry.Kind
+		end
 	end
+
+	for key in pairs(self._state) do
+		if not controlKeys[key] then
+			table.insert(issues, "State sem controle: " .. tostring(key))
+		end
+	end
+
 	if #issues > 0 then
-		warn("[Frank Hub] Validate encontrou " .. tostring(#issues) .. " problema(s).")
+		warn("[Frank Hub] Validate encontrou " .. tostring(#issues) .. " problema(s):\n - " .. table.concat(issues, "\n - "))
 	end
 	return #issues == 0, issues
 end
@@ -2731,7 +3991,7 @@ function HubLibrary:ResetAll()
 		local control = entry.Control
 		if entry.Persist and entry.Default ~= nil and control and type(control.Set) == "function" then
 			pcall(function()
-				control:Set(entry.Default)
+				control:Set(DeepCopy(entry.Default))
 			end)
 		end
 	end
@@ -2745,12 +4005,20 @@ end
 
 function HubLibrary:Snapshot()
 	local data = {
-		Version = 3,
+		Version = 4,
 		Theme = self._themeName,
 		MenuKey = self._menuKey and self._menuKey.Name or nil,
 		State = {},
 		Values = {},
 	}
+
+	-- Tema custom e salvo por inteiro (o nome "Custom" nao e restauravel).
+	if self._themeName == "Custom" then
+		data.CustomTheme = SerializeTheme(self._theme)
+	end
+	if self._fabPos then
+		data.FabPos = { X = self._fabPos.X, Y = self._fabPos.Y }
+	end
 
 	for key, value in pairs(self._state) do
 		if IsJSONSafe(value) then
@@ -2776,29 +4044,40 @@ function HubLibrary:Snapshot()
 	return data
 end
 
+-- silent: true = nao dispara callbacks; nil = segue a opcao FireCallbacks.
 function HubLibrary:Restore(snapshot, silent)
 	if self._destroyed or type(snapshot) ~= "table" then
 		return false
 	end
+	if silent == nil then
+		silent = not self._fireOnRestore
+	end
 
-	if type(snapshot.Theme) == "string" and self._themes[snapshot.Theme] then
+	self._restoring = true
+
+	if type(snapshot.CustomTheme) == "table" then
+		self:SetTheme(DeserializeTheme(snapshot.CustomTheme))
+	elseif type(snapshot.Theme) == "string" and self._themes[snapshot.Theme] then
 		self:SetTheme(snapshot.Theme)
 	end
 	if snapshot.MenuKey then
 		self:SetMenuKeybind(snapshot.MenuKey)
+	end
+	if type(snapshot.FabPos) == "table" then
+		self:SetFabPosition(snapshot.FabPos.X, snapshot.FabPos.Y)
 	end
 
 	for id, value in pairs(snapshot.Values or {}) do
 		local entry = self._registryById[id]
 		local control = entry and entry.Control
 		if control then
-			local ok, err = pcall(function()
+			local ok, err = xpcall(function()
 				if control._deserialize then
 					control._deserialize(value, silent)
 				elseif type(control.Set) == "function" then
 					control:Set(value, silent)
 				end
-			end)
+			end, Traceback)
 			if not ok then
 				warn("[Frank Hub] Restore:", id, err)
 			end
@@ -2806,9 +4085,10 @@ function HubLibrary:Restore(snapshot, silent)
 	end
 
 	for key, value in pairs(snapshot.State or {}) do
-		self:SetState(key, value, silent ~= true)
+		self:SetState(key, value, not silent)
 	end
 
+	self._restoring = false
 	self:Refresh()
 	self:Fire("ConfigRestored", snapshot)
 	return true
@@ -2837,7 +4117,7 @@ function HubLibrary:ImportConfig(json, silent)
 end
 
 function HubLibrary:SetConfigFile(fileName)
-	local safe = tostring(fileName or "FrankHub_Default.json")
+	local safe = tostring(fileName or self._configFile)
 	safe = safe:gsub("[^%w%._%-]", "_")
 	if not safe:lower():match("%.json$") then
 		safe = safe .. ".json"
@@ -2868,7 +4148,8 @@ function HubLibrary:SaveConfig(fileName, quiet)
 	return true
 end
 
-function HubLibrary:LoadConfig(fileName, silent)
+-- quiet: nao mostra notificacao de sucesso.
+function HubLibrary:LoadConfig(fileName, silent, quiet)
 	if fileName then
 		self:SetConfigFile(fileName)
 	end
@@ -2885,7 +4166,9 @@ function HubLibrary:LoadConfig(fileName, silent)
 	end
 	local restored = self:ImportConfig(contents, silent)
 	if restored then
-		self:Notify("Config", "Config carregada: " .. self._configFile, 2.5, "Success")
+		if not quiet then
+			self:Notify("Config", "Config carregada: " .. self._configFile, 2.5, "Success")
+		end
 		self:Fire("ConfigLoaded", self._configFile)
 		return true
 	end
@@ -2901,7 +4184,7 @@ function HubLibrary:SetAutoSave(enabled, fileName)
 end
 
 function HubLibrary:_AutoSaveTick()
-	if not self._autoSave or self._destroyed then
+	if not self._autoSave or self._destroyed or self._restoring then
 		return
 	end
 	self._saveToken = (self._saveToken or 0) + 1
@@ -2912,6 +4195,29 @@ function HubLibrary:_AutoSaveTick()
 		end
 		self:SaveConfig(nil, true)
 	end)
+end
+
+-- Chame depois de criar TODOS os controles: carrega o config salvo
+-- (se existir) e libera o hub. opcoes: AutoLoad (padrao true), AutoSave.
+function HubLibrary:Ready(opcoes)
+	if self._destroyed then
+		return false
+	end
+	opcoes = type(opcoes) == "table" and opcoes or {}
+	local loaded = false
+	if opcoes.AutoLoad ~= false then
+		local ok = self:LoadConfig(nil, nil, true)
+		loaded = ok == true
+		if loaded and opcoes.Notify ~= false then
+			self:Notify("Config", "Config carregada: " .. self._configFile, 2.5, "Success")
+		end
+	end
+	if opcoes.AutoSave ~= nil then
+		self:SetAutoSave(opcoes.AutoSave)
+	end
+	self._ready = true
+	self:Fire("Ready", loaded)
+	return loaded
 end
 
 function HubLibrary:SaveProfile(name)
@@ -2976,6 +4282,10 @@ function HubLibrary:_BuildConfigTab()
 	tab:AddKeybind("Tecla do menu", self._menuKey, nil, "Abre/fecha o menu", function(newKey)
 		self:SetMenuKeybind(newKey)
 	end)
+	tab:AddButton("Resetar posicao do botao F", function()
+		self._fabPos = nil
+		self._fab.Position = UDim2.new(0, 10, 0.5, 0)
+	end)
 
 	tab:AddSection("Configuracao")
 	tab:AddToggle("Auto salvar", function(value)
@@ -2996,12 +4306,12 @@ function HubLibrary:_BuildConfigTab()
 	tab:AddButton("Restaurar padrao", function()
 		self:ResetAll()
 		self:Notify("Config", "Valores padrao restaurados.", 2.5, "Info")
-	end)
+	end, "Volta todos os controles ao valor inicial", true)
 
 	tab:AddSection("Hub")
 	tab:AddButton("Descarregar hub", function()
 		self:Destroy()
-	end)
+	end, nil, true)
 
 	return tab
 end
@@ -3021,8 +4331,16 @@ function HubLibrary:OpenConfig()
 end
 
 --==================================================
+-- ALIASES EM INGLES
+--==================================================
+
+HubLibrary.Load = HubLibrary.Carregar
+HubLibrary.SelectTab = HubLibrary.SelecionarAba
+HubLibrary.Minimize = HubLibrary.Minimizar
+HubLibrary.ToggleMinimize = HubLibrary.ToggleMenu
+
+--==================================================
 -- IMPORTANTE: retorna a biblioteca para o loader.
--- (O hub de exemplo agora fica somente no loader.lua.)
 --==================================================
 
 return HubLibrary
