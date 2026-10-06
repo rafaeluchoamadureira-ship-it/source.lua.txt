@@ -34,7 +34,7 @@ local Global = (type(getgenv) == "function" and getgenv()) or _G
 
 local HubLibrary = {}
 HubLibrary.__index = HubLibrary
-HubLibrary.Version = "4.0"
+HubLibrary.Version = "5.0"
 
 local Tab = {}
 -- Metodos da aba primeiro; se nao existir, delega ao hub
@@ -169,6 +169,45 @@ local THEMES = {
 		Border = rgb(10, 60, 45),
 		Tooltip = rgb(7, 19, 15),
 	},
+}
+
+
+-- Temas extras da v5.0. Eles sao mesclados com Crimson para manter
+-- compatibilidade caso algum campo novo seja adicionado no futuro.
+local EXTRA_THEMES = {
+    Rose = {
+        Background = rgb(18, 8, 13), BackgroundTransparency = 0.05,
+        Top = rgb(225, 35, 100), TopShadow = rgb(110, 15, 50),
+        Card = rgb(28, 10, 20), CardTransparency = 0.08,
+        Control = rgb(38, 15, 27), ControlHover = rgb(62, 24, 43),
+        Accent = rgb(240, 55, 125), AccentHover = rgb(255, 105, 160),
+        Success = rgb(70, 240, 155), Warning = rgb(255, 195, 0),
+        Danger = rgb(255, 75, 105), Text = rgb(255, 248, 252),
+        MutedText = rgb(180, 145, 160), Border = rgb(85, 25, 55),
+        Tooltip = rgb(28, 10, 20),
+    },
+    Ocean = {
+        Background = rgb(5, 13, 20), BackgroundTransparency = 0.04,
+        Top = rgb(0, 150, 205), TopShadow = rgb(0, 75, 110),
+        Card = rgb(7, 21, 31), CardTransparency = 0.08,
+        Control = rgb(10, 30, 43), ControlHover = rgb(20, 48, 65),
+        Accent = rgb(0, 180, 240), AccentHover = rgb(70, 210, 255),
+        Success = rgb(0, 240, 170), Warning = rgb(255, 195, 0),
+        Danger = rgb(255, 80, 100), Text = rgb(245, 253, 255),
+        MutedText = rgb(135, 170, 185), Border = rgb(15, 65, 85),
+        Tooltip = rgb(6, 18, 27),
+    },
+    Graphite = {
+        Background = rgb(16, 16, 18), BackgroundTransparency = 0.02,
+        Top = rgb(55, 58, 65), TopShadow = rgb(28, 30, 34),
+        Card = rgb(25, 26, 29), CardTransparency = 0.02,
+        Control = rgb(31, 33, 37), ControlHover = rgb(47, 49, 55),
+        Accent = rgb(145, 150, 160), AccentHover = rgb(190, 195, 205),
+        Success = rgb(65, 230, 135), Warning = rgb(255, 195, 0),
+        Danger = rgb(255, 80, 90), Text = rgb(250, 250, 252),
+        MutedText = rgb(150, 152, 158), Border = rgb(65, 67, 73),
+        Tooltip = rgb(20, 21, 24),
+    },
 }
 
 local function MergeTheme(base, custom)
@@ -1493,8 +1532,20 @@ function HubLibrary.Carregar(...)
 	-- Config separado por hub e por jogo.
 	self._configFile = tostring(opcoes.ConfigFile or string.format("FrankHub_%s_%s.json", Slug(nomeDoHub), tostring(game.PlaceId)))
 	self._menuKey = NormalizeKey(opcoes.MenuKey) or Enum.KeyCode.RightShift
+	self._watermarkEnabled = opcoes.Watermark == true
+	self._watermarkText = tostring(opcoes.WatermarkText or nomeDoHub)
+	self._showSearch = opcoes.Search ~= false
+	self._showDiscord = opcoes.Discord ~= false
+	self._showConfig = opcoes.Config ~= false
+	self._toastLimit = math.clamp(tonumber(opcoes.NotificationLimit) or 6, 1, 12)
+	self._batchDepth = 0
+	self._batchDirty = false
+	self._destroying = false
 
 	for name, theme in pairs(THEMES) do
+		self._themes[name] = MergeTheme(THEMES.Crimson, theme)
+	end
+	for name, theme in pairs(EXTRA_THEMES) do
 		self._themes[name] = MergeTheme(THEMES.Crimson, theme)
 	end
 	local themeName = (type(opcoes.Theme) == "string" and self._themes[opcoes.Theme]) and opcoes.Theme or "Crimson"
@@ -1502,6 +1553,7 @@ function HubLibrary.Carregar(...)
 	self._theme = self._themes[themeName]
 
 	self:_BuildUI(nomeDoHub)
+	self:_BuildV5Extras(nomeDoHub, opcoes)
 	self.ScreenGui.Parent = guiParent
 	self:SetResponsive(self._responsiveEnabled)
 
@@ -4330,14 +4382,736 @@ function HubLibrary:OpenConfig()
 	self:SelecionarAba(self.ConfigTab)
 end
 
+
+-- Melhora a aba Config sem reescrever a implementacao original.
+do
+    local BuildConfigCore = HubLibrary._BuildConfigTab
+    function HubLibrary:_BuildConfigTab()
+        local tab = BuildConfigCore(self)
+        if self._v5ProfilesAdded or not tab then
+            return tab
+        end
+        self._v5ProfilesAdded = true
+
+        tab:AddDivider("Perfis")
+        local profileInput = tab:AddInput({
+            Name = "Nome do perfil",
+            Default = self._currentProfile or "Default",
+            Flag = "profileName",
+            Description = "Nome usado para salvar/carregar um perfil.",
+            Persist = false,
+        })
+        tab:AddButton("Salvar perfil", function()
+            local name = tostring(profileInput:Get() or "Default")
+            self:SaveProfile(name)
+            self:Notify("Perfil", "Perfil salvo: " .. name, 2.5, "Success")
+        end)
+        tab:AddButton("Carregar perfil", function()
+            local name = tostring(profileInput:Get() or "Default")
+            if self:LoadProfile(name) then
+                self:Notify("Perfil", "Perfil carregado: " .. name, 2.5, "Success")
+            else
+                self:Notify("Perfil", "Perfil nao encontrado: " .. name, 3, "Warning")
+            end
+        end)
+        tab:AddButton("Excluir perfil", function()
+            local name = tostring(profileInput:Get() or "Default")
+            if self:DeleteProfile(name) then
+                self:Notify("Perfil", "Perfil excluido: " .. name, 2.5, "Success")
+            else
+                self:Notify("Perfil", "Nao foi possivel excluir este perfil.", 3, "Warning")
+            end
+        end, "Exclui o perfil informado", true)
+        tab:AddButton("Criar backup da config", function()
+            local ok, err = self:CreateBackup()
+            if ok then
+                self:Notify("Config", "Backup criado.", 2.5, "Success")
+            else
+                self:Notify("Config", tostring(err), 3, "Error")
+            end
+        end)
+        tab:AddButton("Copiar config", function()
+            local result = self:CopyConfig()
+            if result == false then
+                self:Notify("Config", "Nao foi possivel copiar.", 3, "Warning")
+            end
+        end)
+        tab:AddButton("Diagnostico", function()
+            self:DebugReport(true)
+            self:Notify("Debug", "Relatorio enviado ao console.", 2.5, "Info")
+        end)
+
+        return tab
+    end
+end
+
+--==================================================
+-- V5.0 - SISTEMA ULTRA
+--==================================================
+
+-- Registro aprimorado: dependencias, metadados e eventos por controle.
+do
+    local RegisterCore = Tab._Register
+
+    function Tab:_Register(control, kind, title, opts)
+        opts = opts or {}
+        local result = RegisterCore(self, control, kind, title, opts)
+        if not result then
+            return result
+        end
+
+        result.DependsOn = opts.DependsOn or opts.Dependency
+        result.DependsMode = opts.DependsMode or opts.DependencyMode or "all"
+        result.Disabled = false
+        if result.DependsOn then
+            task.defer(function()
+                if not self._destroyed then
+                    self._hub:RefreshDependencies()
+                end
+            end)
+        end
+        result._changedListeners = {}
+
+        function result:OnChanged(callback)
+            if type(callback) ~= "function" then
+                return nil
+            end
+            table.insert(self._changedListeners, callback)
+            return {
+                Disconnect = function()
+                    local i = table.find(self._changedListeners, callback)
+                    if i then
+                        table.remove(self._changedListeners, i)
+                    end
+                end,
+            }
+        end
+
+        function result:SetVisible(visible)
+            if self.Object and self.Object.Parent then
+                self.Object.Visible = visible ~= false
+            end
+            return visible ~= false
+        end
+
+        function result:IsVisible()
+            return self.Object and self.Object.Visible == true
+        end
+
+        function result:SetDisabled(disabled)
+            return self._hub:SetEnabled(self, disabled ~= true)
+        end
+
+        function result:IsDisabled()
+            return self.Disabled == true
+        end
+
+        function result:FireChanged(value)
+            for _, listener in ipairs(table.clone(self._changedListeners)) do
+                SafeCall(listener, value, self)
+            end
+        end
+
+        -- Faz o callback interno continuar existindo, mas tambem permite
+        -- observers externos sem precisar alterar cada Add* individualmente.
+        local oldSet = result.Set
+        if type(oldSet) == "function" then
+            result.Set = function(selfControl, value, silent)
+                local before
+                pcall(function()
+                    before = selfControl:Get()
+                end)
+                local output = oldSet(selfControl, value, silent)
+                if not silent then
+                    local after
+                    pcall(function()
+                        after = selfControl:Get()
+                    end)
+                    if before ~= after then
+                        selfControl:FireChanged(after)
+                    end
+                end
+                return output
+            end
+        end
+
+        return result
+    end
+end
+
+function HubLibrary:_BuildV5Extras(nomeDoHub, opcoes)
+    if self._destroyed then
+        return
+    end
+
+    -- Watermark discreta, totalmente opcional.
+    local watermark = New("TextLabel", {
+        Name = "FrankWatermark",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -14, 0, 10),
+        Size = UDim2.fromOffset(260, 24),
+        BackgroundTransparency = 1,
+        Text = self._watermarkText,
+        TextSize = 14,
+        FontFace = FONT_BOLD,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Visible = self._watermarkEnabled,
+        ZIndex = 80,
+    }, self.ScreenGui)
+    self:_T(watermark, "TextColor3", "MutedText")
+    self._watermark = watermark
+
+    -- Atalhos para elementos que ja existem na UI.
+    if self._searchFrame then
+        self._searchFrame.Visible = self._showSearch
+    end
+    if self._searchInput then
+        self._searchInput.PlaceholderText = tostring(opcoes.SearchPlaceholder or "Pesquisar...")
+    end
+
+    local discord = self.FixedButtonsFrame and self.FixedButtonsFrame:FindFirstChild("DiscordButton")
+    local config = self.FixedButtonsFrame and self.FixedButtonsFrame:FindFirstChild("ConfigButton")
+    if discord then discord.Visible = self._showDiscord end
+    if config then config.Visible = self._showConfig end
+end
+
+function HubLibrary:SetWatermark(enabled, text)
+    if self._destroyed or not self._watermark then
+        return false
+    end
+    if text ~= nil then
+        self._watermarkText = tostring(text)
+        self._watermark.Text = self._watermarkText
+    end
+    self._watermarkEnabled = enabled ~= false
+    self._watermark.Visible = self._watermarkEnabled
+    return self._watermarkEnabled
+end
+
+function HubLibrary:SetTitle(title)
+    if self._destroyed or not self.MenuName then
+        return false
+    end
+    self.MenuName.Text = tostring(title or "Frank Hub")
+    return true
+end
+
+function HubLibrary:GetTitle()
+    return self.MenuName and self.MenuName.Text or ""
+end
+
+function HubLibrary:SetWindowSize(width, height)
+    if self._destroyed or not self.BackGround then
+        return false
+    end
+    width = math.clamp(tonumber(width) or WIN_W, 360, 1200)
+    height = math.clamp(tonumber(height) or WIN_H, 260, 900)
+    self.BackGround.Size = UDim2.fromOffset(width, height)
+    return true
+end
+
+function HubLibrary:GetWindowSize()
+    if not self.BackGround then
+        return nil
+    end
+    return self.BackGround.AbsoluteSize
+end
+
+function HubLibrary:SetWindowPosition(x, y)
+    if self._destroyed or not self.BackGround then
+        return false
+    end
+    x = math.clamp(tonumber(x) or 0.5, 0, 1)
+    y = math.clamp(tonumber(y) or 0.1, 0, 1)
+    self.BackGround.AnchorPoint = Vector2.new(0.5, 0)
+    self.BackGround.Position = UDim2.fromScale(x, y)
+    return true
+end
+
+function HubLibrary:SetSearchVisible(visible)
+    self._showSearch = visible ~= false
+    if self._searchFrame then
+        self._searchFrame.Visible = self._showSearch
+    end
+    if self._pages then
+        local offset = self._showSearch and (SEARCH_H + 8) or 0
+        self._pages.Position = UDim2.fromOffset(0, offset)
+        self._pages.Size = UDim2.new(1, 0, 1, -offset)
+    end
+    return self._showSearch
+end
+
+function HubLibrary:SetFixedButtonVisible(name, visible)
+    if not self.FixedButtonsFrame then
+        return false
+    end
+    local button = self.FixedButtonsFrame:FindFirstChild(tostring(name))
+    if not button then
+        return false
+    end
+    button.Visible = visible ~= false
+    return button.Visible
+end
+
+function HubLibrary:GetControl(id)
+    return self:FindItem(id)
+end
+
+function HubLibrary:Get(id)
+    local control = self:FindItem(id)
+    if not control or type(control.Get) ~= "function" then
+        return nil
+    end
+    return control:Get()
+end
+
+function HubLibrary:Set(id, value, silent)
+    local control = self:FindItem(id)
+    if not control or type(control.Set) ~= "function" then
+        return false
+    end
+    control:Set(value, silent)
+    return true
+end
+
+function HubLibrary:Toggle(id)
+    local control = self:FindItem(id)
+    if not control then
+        return false
+    end
+    if type(control.Toggle) == "function" then
+        control:Toggle()
+        return true
+    end
+    if type(control.Get) == "function" and type(control.Set) == "function" then
+        control:Set(not control:Get())
+        return true
+    end
+    return false
+end
+
+function HubLibrary:SetDescription(id, description)
+    local control = self:FindItem(id)
+    if not control then
+        return false
+    end
+    control.Description = description
+    local label = control.Object and control.Object:FindFirstChild("Description", true)
+    if label and label:IsA("TextLabel") then
+        label.Text = tostring(description or "")
+    end
+    return true
+end
+
+function HubLibrary:BeginUpdate()
+    self._batchDepth = (self._batchDepth or 0) + 1
+    return self._batchDepth
+end
+
+function HubLibrary:EndUpdate(refresh)
+    self._batchDepth = math.max((self._batchDepth or 1) - 1, 0)
+    if self._batchDepth == 0 and refresh ~= false then
+        self:Refresh()
+    end
+    return self._batchDepth
+end
+
+function HubLibrary:Batch(callback)
+    if type(callback) ~= "function" then
+        return false
+    end
+    self:BeginUpdate()
+    local ok, err = xpcall(callback, Traceback, self)
+    self:EndUpdate()
+    if not ok then
+        warn("[Frank Hub] Batch:", err)
+    end
+    return ok, err
+end
+
+function HubLibrary:FindTab(name)
+    name = tostring(name or "")
+    for _, tab in ipairs(self.Abas) do
+        if tab.Name == name then
+            return tab
+        end
+    end
+    return nil
+end
+
+function HubLibrary:SelectTab(name)
+    local tab = type(name) == "table" and name or self:FindTab(name)
+    if not tab then
+        return false
+    end
+    self:SelecionarAba(tab)
+    return true
+end
+
+function HubLibrary:SetThemeColor(key, value)
+    local color = ParseColor(value)
+    if not color or type(key) ~= "string" then
+        return false
+    end
+    local theme = self:GetTheme()
+    theme[key] = color
+    return self:SetTheme(theme)
+end
+
+function HubLibrary:GetThemeHex(key)
+    local color = self._theme and self._theme[key]
+    if typeof(color) ~= "Color3" then
+        return nil
+    end
+    return ToHex(color)
+end
+
+function HubLibrary:CopyConfig()
+    local json = self:ExportConfig()
+    if not json then
+        return false
+    end
+    if type(setclipboard) == "function" then
+        local ok = pcall(setclipboard, json)
+        if ok then
+            self:Notify("Config", "Config copiada para a area de transferencia.", 2.5, "Success")
+            return true
+        end
+    end
+    return json
+end
+
+function HubLibrary:PasteConfig()
+    if type(getclipboard) ~= "function" then
+        return false, "getclipboard indisponivel"
+    end
+    local ok, value = pcall(getclipboard)
+    if not ok or type(value) ~= "string" or value == "" then
+        return false, "clipboard vazio"
+    end
+    local restored = self:ImportConfig(value)
+    if restored then
+        self:Notify("Config", "Config importada do clipboard.", 2.5, "Success")
+    end
+    return restored
+end
+
+function HubLibrary:ExportProfile(name)
+    name = tostring(name or self._currentProfile or "Default")
+    local snapshot = self._profiles[name] or self:Snapshot()
+    local ok, json = pcall(HttpService.JSONEncode, HttpService, snapshot)
+    if not ok then
+        return nil, json
+    end
+    return json
+end
+
+function HubLibrary:ImportProfile(name, json, silent)
+    name = tostring(name or "Default")
+    local ok, snapshot = pcall(HttpService.JSONDecode, HttpService, tostring(json or ""))
+    if not ok or type(snapshot) ~= "table" then
+        return false, "perfil invalido"
+    end
+    self._profiles[name] = snapshot
+    self._currentProfile = name
+    if not silent then
+        self:Restore(snapshot)
+    end
+    self:Fire("ProfileImported", name)
+    return true
+end
+
+function HubLibrary:SaveProfileFile(name, fileName)
+    name = tostring(name or "Default")
+    if not FileApiAvailable() then
+        return false, "API de arquivo indisponivel"
+    end
+    local json, err = self:ExportProfile(name)
+    if not json then
+        return false, err
+    end
+    fileName = tostring(fileName or ("FrankHub_Profile_" .. Slug(name) .. ".json"))
+    local ok, writeErr = pcall(writefile, fileName, json)
+    if not ok then
+        return false, writeErr
+    end
+    return true
+end
+
+function HubLibrary:LoadProfileFile(name, fileName)
+    name = tostring(name or "Default")
+    if not FileApiAvailable() then
+        return false, "API de arquivo indisponivel"
+    end
+    fileName = tostring(fileName or ("FrankHub_Profile_" .. Slug(name) .. ".json"))
+    local okExists, exists = pcall(isfile, fileName)
+    if not okExists or not exists then
+        return false, "arquivo nao encontrado"
+    end
+    local okRead, json = pcall(readfile, fileName)
+    if not okRead then
+        return false, json
+    end
+    return self:ImportProfile(name, json)
+end
+
+function HubLibrary:CreateBackup(fileName)
+    if not FileApiAvailable() then
+        return false, "API de arquivo indisponivel"
+    end
+    fileName = tostring(fileName or (self._configFile .. ".bak"))
+    local json = self:ExportConfig()
+    if not json then
+        return false, "falha ao exportar config"
+    end
+    local ok, err = pcall(writefile, fileName, json)
+    if not ok then
+        return false, err
+    end
+    return true
+end
+
+function HubLibrary:Diagnostics()
+    local valid, issues = self:Validate()
+    local info = {
+        Version = self.Version,
+        Theme = self._themeName,
+        Tabs = #self.Abas,
+        Controls = #self._registry,
+        StateKeys = 0,
+        Profiles = #self:GetProfiles(),
+        AutoSave = self._autoSave == true,
+        Ready = self._ready == true,
+        Destroyed = self._destroyed == true,
+        Valid = valid,
+        Issues = issues,
+    }
+    for _ in pairs(self._state) do
+        info.StateKeys = info.StateKeys + 1
+    end
+    return info
+end
+
+function HubLibrary:DebugReport(printReport)
+    local d = self:Diagnostics()
+    local report = string.format(
+        "Frank Hub %s | Tabs=%d | Controls=%d | States=%d | Profiles=%d | Theme=%s | Valid=%s",
+        tostring(d.Version), d.Tabs, d.Controls, d.StateKeys, d.Profiles,
+        tostring(d.Theme), tostring(d.Valid)
+    )
+    if printReport ~= false then
+        print("[Frank Hub] " .. report)
+        if #d.Issues > 0 then
+            warn("[Frank Hub] Issues:\n - " .. table.concat(d.Issues, "\n - "))
+        end
+    end
+    return report, d
+end
+
+-- Atualiza dependencias automaticamente sempre que um State muda.
+do
+    local SetStateCore = HubLibrary.SetState
+    function HubLibrary:SetState(key, value, fireEvent)
+        local result = SetStateCore(self, key, value, fireEvent)
+        if not self._restoring and self._dependencyRefreshLock ~= true then
+            self._dependencyRefreshLock = true
+            pcall(function()
+                self:RefreshDependencies()
+            end)
+            self._dependencyRefreshLock = false
+        end
+        return result
+    end
+end
+
+-- Dependencias: o controle pode depender de um ou varios StateKey/IDs.
+function HubLibrary:_ResolveDependency(control)
+    if not control or not control.DependsOn then
+        return true
+    end
+    local deps = type(control.DependsOn) == "table" and control.DependsOn or { control.DependsOn }
+    local results = {}
+    for _, dep in ipairs(deps) do
+        local depControl = self:FindItem(tostring(dep))
+        local value
+        if depControl and type(depControl.Get) == "function" then
+            local ok, result = pcall(depControl.Get)
+            if ok then value = result end
+        else
+            value = self:GetState(tostring(dep), nil)
+        end
+        table.insert(results, value == true or value ~= nil and value ~= false)
+    end
+    if control.DependsMode == "any" then
+        for _, result in ipairs(results) do
+            if result then return true end
+        end
+        return false
+    end
+    for _, result in ipairs(results) do
+        if not result then return false end
+    end
+    return true
+end
+
+function HubLibrary:RefreshDependencies()
+    for _, entry in ipairs(self._registry) do
+        local control = entry.Control
+        if control and control.DependsOn then
+            self:SetEnabled(control, self:_ResolveDependency(control))
+        end
+    end
+end
+
+function HubLibrary:AddDependency(control, dependency, mode)
+    if type(control) == "string" then
+        control = self:FindItem(control)
+    end
+    if not control then return false end
+    control.DependsOn = dependency
+    control.DependsMode = mode or "all"
+    self:RefreshDependencies()
+    return true
+end
+
+-- Substitui SetEnabled por uma versao que realmente bloqueia entrada,
+-- sem destruir o controle e sem interferir no config.
+do
+    local SetEnabledCore = HubLibrary.SetEnabled
+    function HubLibrary:SetEnabled(control, enabled)
+        if type(control) == "string" then
+            control = self:FindItem(control)
+        end
+        local entry = type(control) == "table" and control._entry or nil
+        if not entry or not entry.Object then
+            return false
+        end
+
+        local active = enabled ~= false
+        control.Disabled = not active
+        entry.ForceHidden = false
+        entry.Object.Visible = entry.Visible ~= false
+
+        if control._disabledOverlay and control._disabledOverlay.Parent then
+            control._disabledOverlay:Destroy()
+            control._disabledOverlay = nil
+        end
+
+        if not active and entry.Object.Parent then
+            local overlay = New("TextButton", {
+                Name = "DisabledOverlay",
+                Size = UDim2.fromScale(1, 1),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Text = "",
+                AutoButtonColor = false,
+                Active = true,
+                ZIndex = 100,
+            }, entry.Object)
+            control._disabledOverlay = overlay
+            self:_Conn(overlay.MouseButton1Click, function()
+                self:Notify("Frank Hub", control.Title .. " esta desativado.", 1.5, "Info")
+            end, control)
+        end
+
+        if entry.Object:IsA("GuiObject") then
+            entry.Object.BackgroundTransparency = entry.Object.BackgroundTransparency
+        end
+        self:Fire("ControlEnabledChanged", control, active)
+        return active
+    end
+end
+
+-- Adiciona controles leves que nao existiam na v4.
+function Tab:AddDivider(text)
+    if self._destroyed then return nil end
+    local hub = self._hub
+    local frame = New("Frame", {
+        Name = "Divider",
+        Size = UDim2.new(1, 0, 0, text and 30 or 14),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    }, self.Scroll)
+    local line = New("Frame", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        Position = UDim2.new(0, 8, 0.5, text and 7 or 0),
+        Size = UDim2.new(1, -16, 0, 1),
+        BorderSizePixel = 0,
+    }, frame)
+    hub:_T(line, "BackgroundColor3", "Border")
+    if text then
+        local label = New("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(12, 0),
+            Size = UDim2.new(1, -24, 0, 20),
+            Text = tostring(text),
+            TextSize = 14,
+            FontFace = FONT_BOLD,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, frame)
+        hub:_T(label, "TextColor3", "MutedText")
+    end
+    return self:_Register({ Object = frame }, "Divider", text or "divider", { Persist = false })
+end
+
+function Tab:AddBadge(text, kind)
+    if self._destroyed then return nil end
+    local hub = self._hub
+    local card = self:_NewCard(34, "Badge")
+    local label = New("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(10, 0),
+        Size = UDim2.new(1, -20, 1, 0),
+        Text = tostring(text or "Badge"),
+        TextSize = 15,
+        FontFace = FONT_BOLD,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, card)
+    local kindKey = KIND_KEY[tostring(kind or "Info")] or "Accent"
+    hub:_T(label, "TextColor3", kindKey)
+    local control = { Object = card, Label = label }
+    control.SetText = function(_, value) label.Text = tostring(value or "") end
+    control.Get = function() return label.Text end
+    return self:_Register(control, "Badge", text or "Badge", { Persist = false })
+end
+
+function Tab:AddConfirmButton(text, callback, confirmText)
+    return self:AddButton({
+        Name = text,
+        Callback = callback,
+        Confirm = confirmText or "Confirmar? Clique de novo",
+    })
+end
+
+-- Corrige o carregamento de configs antigas e adiciona migração simples.
+do
+    local RestoreCore = HubLibrary.Restore
+    function HubLibrary:Restore(snapshot, silent)
+        if type(snapshot) == "table" then
+            local version = tonumber(snapshot.Version) or 1
+            if version < 4 and snapshot.Values == nil and snapshot.State == nil then
+                snapshot = { Version = 4, Values = snapshot }
+            end
+            snapshot.Version = 5
+        end
+        return RestoreCore(self, snapshot, silent)
+    end
+end
+
 --==================================================
 -- ALIASES EM INGLES
 --==================================================
 
 HubLibrary.Load = HubLibrary.Carregar
-HubLibrary.SelectTab = HubLibrary.SelecionarAba
 HubLibrary.Minimize = HubLibrary.Minimizar
 HubLibrary.ToggleMinimize = HubLibrary.ToggleMenu
+HubLibrary.GetItem = HubLibrary.FindItem
+HubLibrary.SetValue = HubLibrary.Set
+HubLibrary.GetValue = HubLibrary.Get
+HubLibrary.ToggleValue = HubLibrary.Toggle
+HubLibrary.SetSize = HubLibrary.SetWindowSize
+HubLibrary.SetPosition = HubLibrary.SetWindowPosition
+HubLibrary.SetWaterMark = HubLibrary.SetWatermark
 
 --==================================================
 -- IMPORTANTE: retorna a biblioteca para o loader.
