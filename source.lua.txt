@@ -931,6 +931,16 @@ function HubLibrary:_ClosePopupIfOutside(input)
 		return
 	end
 	local point = ScreenPoint(input.Position)
+	local ok, objects = pcall(function()
+		return GuiService:GetGuiObjectsAtPosition(point.X, point.Y)
+	end)
+	if ok and type(objects) == "table" then
+		for _, guiObject in ipairs(objects) do
+			if guiObject == object or guiObject:IsDescendantOf(object) then
+				return
+			end
+		end
+	end
 	local pos, size = object.AbsolutePosition, object.AbsoluteSize
 	if point.X < pos.X or point.X > pos.X + size.X or point.Y < pos.Y or point.Y > pos.Y + size.Y then
 		self:_ClosePopup()
@@ -1046,8 +1056,9 @@ function HubLibrary:_BuildUI(nomeDoHub)
 		Name = "Menu Hub",
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
-		DisplayOrder = 100,
+		DisplayOrder = 999,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Enabled = true,
 	})
 	self.ScreenGui = gui
 
@@ -1075,6 +1086,7 @@ function HubLibrary:_BuildUI(nomeDoHub)
 	-- Barra superior ---------------------------------------
 	local top = New("Frame", {
 		Name = "BackGroundTop",
+		ZIndex = 10,
 		Size = UDim2.new(1, 0, 0, TOP_H),
 		BorderSizePixel = 0,
 	}, win)
@@ -1108,6 +1120,7 @@ function HubLibrary:_BuildUI(nomeDoHub)
 
 	local menuName = New("TextLabel", {
 		Name = "MenuName",
+		ZIndex = 12,
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(14, 0),
 		Size = UDim2.new(1, -100, 1, 0),
@@ -1163,6 +1176,7 @@ function HubLibrary:_BuildUI(nomeDoHub)
 	-- Corpo -----------------------------------------------
 	local body = New("Frame", {
 		Name = "Body",
+		ZIndex = 5,
 		Position = UDim2.fromOffset(0, TOP_H),
 		Size = UDim2.new(1, 0, 1, -TOP_H),
 		BackgroundTransparency = 1,
@@ -1242,6 +1256,7 @@ function HubLibrary:_BuildUI(nomeDoHub)
 	local contentX = PAD * 2 + LEFT_W
 	local content = New("Frame", {
 		Name = "Content",
+		ZIndex = 6,
 		Position = UDim2.fromOffset(contentX, CONTENT_TOP),
 		Size = UDim2.new(1, -(contentX + PAD), 1, -(CONTENT_TOP + PAD)),
 		BackgroundTransparency = 1,
